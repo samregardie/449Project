@@ -22,7 +22,6 @@ zephyrproject/     ← west workspace (not tracked): .venv/ .west/ zephyr/ modul
    source .venv/bin/activate
    pip install west
    west init -m https://github.com/zephyrproject-rtos/zephyr .
-   git -C zephyr checkout 70be2ff0b56   # pinned commit; everyone uses this one
    west update
    west packages pip --install
    git clone <this-repo-url> 449Project
