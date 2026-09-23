@@ -1,0 +1,12 @@
+# Activate the west venv and Zephyr env for this repo.
+# Must be sourced, not executed:  source ./setup449
+
+if [ -n "$ZSH_VERSION" ]; then
+    _setup449_dir="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+else
+    _setup449_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+source "$_setup449_dir/../.venv/bin/activate"
+source "$_setup449_dir/../zephyr/zephyr-env.sh"
+unset _setup449_dir

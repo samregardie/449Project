@@ -14,8 +14,7 @@ The repo sits inside a west workspace at `../` (`.venv/`, `.west/`, `zephyr/`, `
 
 Every new shell, from the repo root:
 ```sh
-source ../.venv/bin/activate
-source ../zephyr/zephyr-env.sh
+source ./setup449   # activates ../.venv and sources ../zephyr/zephyr-env.sh; must be sourced, not exexcuted
 ```
 
 ```sh

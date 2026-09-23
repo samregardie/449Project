@@ -2,7 +2,8 @@
 
 Lab 2 firmware for the STM32 Nucleo-F401RE, built with Zephyr.
 
-- `stm32/`: the Zephyr app (empty for now)
+- `stm32/`: the Zephyr app
+- `setup449`: shell setup script (see [Every new shell](#every-new-shell))
 
 This repo sits inside a west workspace:
 
@@ -29,13 +30,13 @@ zephyrproject/     ← west workspace (not tracked): .venv/ .west/ zephyr/ modul
 
 ## Every new shell
 
-Run from `449Project/`:
+Run from `449Project/` (bash or zsh):
 
 ```sh
-source ../.venv/bin/activate      # Windows: ..\.venv\Scripts\activate.bat
-source ../zephyr/zephyr-env.sh    # Windows: ..\zephyr\zephyr-env.cmd
+source ./setup449
 ```
 
+It must be sourced, not executed. It activates the west venv and the Zephyr environment.
 ## Check that your setup works
 
 Build and flash a stock Zephyr sample. The green LED (LD2) should blink:
