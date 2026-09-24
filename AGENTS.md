@@ -6,9 +6,9 @@ Guidance for AI coding agents (Claude Code, Codex, etc.) in this repo.
 
 Team repo for an embedded-systems course, Lab 2: Sensor/Actuator Bring-up (due 2026-10-01). Target: STM32 Nucleo-F401RE running Zephyr. The spec is `Lab2_handout.pdf`; flashing/debugging notes are `Flashing_and_Debugging_Your_Nucleo.pdf`.
 
-The repo is kept minimal on purpose. `stm32/` is where the Zephyr app goes (currently empty). Don't add folders, tooling or scaffolding the team didn't ask for.
+The repo is kept minimal on purpose. `lab2/stm32/` is the Zephyr app; `lab2/pi/` is for the Raspberry Pi side. Don't add folders, tooling or scaffolding the team didn't ask for.
 
-The repo sits inside a west workspace at `../` (`.venv/`, `.west/`, `zephyr/`, `modules/`). That is upstream code: never edit it, and don't `git pull` in `../zephyr/` (pinned to commit `70be2ff0b56`). Put hardware customization in an app overlay (`stm32/boards/nucleo_f401re.overlay`), not in `../zephyr/boards/`.
+The repo sits inside a west workspace at `../` (`.venv/`, `.west/`, `zephyr/`, `modules/`). That is upstream code: never edit it, and don't `git pull` in `../zephyr/` (pinned to commit `70be2ff0b56`). Put hardware customization in an app overlay (`lab2/stm32/app.overlay`), not in `../zephyr/boards/`.
 
 ## Commands
 
@@ -19,7 +19,7 @@ source ./setup449   # activates ../.venv and sources ../zephyr/zephyr-env.sh; mu
 
 ```sh
 west build -p always -b nucleo_f401re ../zephyr/samples/basic/blinky   # sanity-check toolchain + board
-west build -p always -b nucleo_f401re stm32                            # build our app
+west build -p always -b nucleo_f401re lab2/stm32                       # build our app
 west build                                                             # incremental rebuild
 west flash                                                             # uses STM32CubeProgrammer
 west debugserver   # terminal 1 (OpenOCD)

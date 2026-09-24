@@ -2,7 +2,7 @@
 
 Lab 2 firmware for the STM32 Nucleo-F401RE, built with Zephyr.
 
-- `stm32/`: the Zephyr app
+- `lab2/stm32/`: the Zephyr app
 - `setup449`: shell setup script (see [Every new shell](#every-new-shell))
 
 This repo sits inside a west workspace:
@@ -48,17 +48,17 @@ west flash
 
 ## Build, flash, debug our app
 
-Run from `449Project/` once `stm32/` has an app in it:
+Run from `449Project/`:
 
 ```sh
-west build -p always -b nucleo_f401re stm32   # full rebuild
+west build -p always -b nucleo_f401re lab2/stm32   # full rebuild
 west flash
-west debugserver                              # terminal 1
-west debug                                    # terminal 2
+west debugserver                                   # terminal 1
+west debug                                         # terminal 2
 ```
 
 For debugging, build with optimizations off:
 
 ```sh
-west build -p always -b nucleo_f401re stm32 -- -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y
+west build -p always -b nucleo_f401re lab2/stm32 -- -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y
 ```
