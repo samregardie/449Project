@@ -12,10 +12,10 @@
 #include "state.h"
 
 /** Configure this **/
-#define LOCAL_HOST "18449group0" // IP of local interface
+#define LOCAL_HOST "172.26.166.54" // IP of local interface
 #define R_PORT 8000
 
-#define REMOTE_HOST "169.254.227.87"
+#define REMOTE_HOST "172.26.27.234"
 #define S_PORT 8001
 /** **/
 
