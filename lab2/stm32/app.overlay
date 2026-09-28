@@ -1,0 +1,159 @@
+/*
+ * Lab 2 pin assignments for the Nucleo-F401RE, per lab2/Schematic (V2).
+ *
+ * Pitfalls:
+ * - The board file already gives many header pins to SPI/I2C/UART/PWM. The
+ *   build does NOT flag two users of one pin; the last driver to set it
+ *   wins. Before enabling a board peripheral, check its pins against this file.
+ * - GPIOs use Arduino names (D2, A5); PWM/ADC pinctrl uses MCU names (PA10).
+ *   Both refer to the same pins: see the comments below.
+ * - The KiCad symbol calls D14/D15 "SDA/A4" and "SCL/A5". On the Nucleo they
+ *   are PB9/PB8, separate from A4/A5 (PC1/PC0).
+ * - All channels of a timer share one period, so the servo has its own timer.
+ * - D13 (PA5) also drives the green LD2, so it mirrors FL.
+ * - D0/D1 (Pi UART) aren't connected to PA3/PA2 by default. USART2 is the
+ *   ST-Link USB console.
+ */
+
+/* Board peripherals that claim pins we use */
+&spi1 {		/* D11-D13 */
+	status = "disabled";
+};
+
+&usart1 {	/* D10 */
+	status = "disabled";
+};
+
+&pwm2 {		/* D13 */
+	status = "disabled";
+};
+
+&i2c1 {		/* D14, D15 */
+	status = "disabled";
+};
+
+&i2c3 {		/* D7 */
+	status = "disabled";
+};
+
+/* Servo: A0 = PA0 */
+&timers5 {
+	status = "okay";
+
+	pwm5: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim5_ch1_pa0>;
+		pinctrl-names = "default";
+	};
+};
+
+/* Right motor PWM: D2 = PA10 (L298N IN1) */
+&timers1 {
+	status = "okay";
+
+	pwm1: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim1_ch3_pa10>;
+		pinctrl-names = "default";
+	};
+};
+
+/* Left motor PWM: D4 = PB5 (L298N IN3) */
+&timers3 {
+	status = "okay";
+
+	pwm3: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim3_ch2_pb5>;
+		pinctrl-names = "default";
+	};
+};
+
+/* The board sets ADCCLK to 84/2 = 42 MHz; the F401 maximum is 36 MHz */
+&adc123_common {
+	st,adc-prescaler = <4>;
+};
+
+/*
+ * Current sensors: A1 = PA1 (I_Right), A2 = PA4 (I_Left), A3 = PB0 (I_Servo).
+ * Longest sample time, because the 4.7k/4.7k dividers are a high-impedance
+ * source.
+ */
+&adc1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&adc1_in1_pa1 &adc1_in4_pa4 &adc1_in8_pb0>;
+
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	channel@8 {
+		reg = <8>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/ {
+	/* pin -> 4.7k -> LED -> GND, so high = on */
+	blinkers {
+		compatible = "gpio-leds";
+
+		blink_fl: blink_fl {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D13 GPIO_ACTIVE_HIGH>;
+		};
+
+		blink_fr: blink_fr {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
+		};
+
+		blink_rl: blink_rl {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
+		};
+
+		blink_rr: blink_rr {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D10 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	zephyr,user {
+		/* <A>, <B> */
+		enc-right-gpios = <&arduino_header ARDUINO_HEADER_R3_D6 GPIO_ACTIVE_HIGH>,
+				  <&arduino_header ARDUINO_HEADER_R3_D7 GPIO_ACTIVE_HIGH>;
+		enc-left-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>,
+				 <&arduino_header ARDUINO_HEADER_R3_D9 GPIO_ACTIVE_HIGH>;
+
+		/* L298N IN2, IN4 (ENA/ENB tied high) */
+		motor-right-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D3 GPIO_ACTIVE_HIGH>;
+		motor-left-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D5 GPIO_ACTIVE_HIGH>;
+
+		/* Test points */
+		dir-a-gpios = <&arduino_header ARDUINO_HEADER_R3_A5 GPIO_ACTIVE_HIGH>;
+		pwm-set-gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
+		cmd-rx-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
+
+		/* Motor period (20 kHz) is a placeholder */
+		pwms = <&pwm5 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>,
+		       <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
+		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;
+		pwm-names = "servo", "motor_right", "motor_left";
+
+		io-channels = <&adc1 1>, <&adc1 4>, <&adc1 8>;
+		io-channel-names = "i_right", "i_left", "i_servo";
+	};
+};
