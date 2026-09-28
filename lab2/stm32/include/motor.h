@@ -5,10 +5,13 @@
 
 #include "encoder.h"	/* enum side */
 
+/* Full duty; motor_set() takes -MOTOR_DUTY_MAX..MOTOR_DUTY_MAX */
+#define MOTOR_DUTY_MAX 1000
+
 /* Configure PWM, DIR and test-point pins; both motors start braked */
 int motor_init(void);
 
-/* Signed duty, -MAX..MAX (team picks MAX); toggles PWM_SET after the write */
+/* Positive = forward; out-of-range values are clamped. Toggles PWM_SET */
 void motor_set(enum side s, int32_t duty);
 
 /* Both motors: PWM off and dynamic braking */
