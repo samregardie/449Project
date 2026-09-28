@@ -1,6 +1,6 @@
 /*
- * Blinker test: steps through the blinker states, printing each one.
- * Watch the LEDs next to the console (115200 baud on the ST-Link USB port).
+ * Encoder test: prints both counts every 200 ms. Spin each wheel by hand.
+ * Watch the console (115200 baud on the ST-Link USB port).
  */
 
 #include <zephyr/kernel.h>
@@ -9,6 +9,7 @@
 #include "drive.h"
 
 // TESTING ONLY - REMOVE
+#include "encoder.h"
 #include "motor.h"
 
 #define PAST_LEFT  (-2 * BLINKER_TURN_THRESHOLD)
@@ -21,35 +22,18 @@ int main(void)
 		return 0;
 	}
 
-	// if (drive_init() < 0) {
-	// 	printk("drive_init failed\n");
-	// 	return 0;
-	// }
+	/* Brakes both motors, then sets up the encoders */
+	if (drive_init() < 0) {
+		printk("drive_init failed\n");
+		return 0;
+	}
 
 	// TESTING ONLY - REMOVE
-	motor_init();
-
-	motor_set(SIDE_LEFT, 300);
-	k_msleep(3000);
-
-	motor_brake();
-	k_msleep(1000);
-
-	motor_set(SIDE_LEFT, -300);
-	k_msleep(3000);
-
-	motor_brake();
-
-	motor_set(SIDE_RIGHT, 300);
-	k_msleep(3000);
-
-	motor_brake();
-	k_msleep(1000);
-
-	motor_set(SIDE_RIGHT, -300);
-	k_msleep(3000);
-
-	motor_brake();
+	while (1) {
+		printk("left %6d  right %6d\n",
+		       encoder_count(SIDE_LEFT), encoder_count(SIDE_RIGHT));
+		k_msleep(200);
+	}
 
 	return 0;
 }
