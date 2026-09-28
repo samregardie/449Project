@@ -6,6 +6,7 @@
 #include <zephyr/kernel.h>
 
 #include "blinker.h"
+#include "drive.h"
 
 #define PAST_LEFT  (-2 * BLINKER_TURN_THRESHOLD)
 #define PAST_RIGHT (2 * BLINKER_TURN_THRESHOLD)
@@ -16,7 +17,12 @@ int main(void)
 		printk("blinker_init failed\n");
 		return 0;
 	}
-	
+
+	if (drive_init() < 0) {
+		printk("drive_init failed\n");
+		return 0;
+	}
+
 	// test, feel free to delete
 	blinker_set_error(true);
 
