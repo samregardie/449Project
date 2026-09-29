@@ -23,11 +23,10 @@ static const struct gpio_dt_spec dir[] = {
 
 /* Test points */
 static const struct gpio_dt_spec tp_dir_a = GPIO_DT_SPEC_GET(USER_NODE, dir_a_gpios);
-static const struct gpio_dt_spec tp_pwm_set = GPIO_DT_SPEC_GET(USER_NODE, pwm_set_gpios);
 
 int motor_init(void)
 {
-	const struct gpio_dt_spec *outputs[] = { &dir[SIDE_LEFT], &dir[SIDE_RIGHT], &tp_dir_a, &tp_pwm_set };
+	const struct gpio_dt_spec *outputs[] = { &dir[SIDE_LEFT], &dir[SIDE_RIGHT], &tp_dir_a };
 
 	for (int i = 0; i < ARRAY_SIZE(outputs); i++) {
 		if (!gpio_is_ready_dt(outputs[i])) {
@@ -95,7 +94,6 @@ void motor_set(enum side s, int32_t duty)
 
 	write_dir(s, dir_high);
 	pwm_set_pulse_dt(&pwm[s], pulse);
-	gpio_pin_toggle_dt(&tp_pwm_set);
 }
 
 /* IN1 = IN2 = low: PWM off and both motor terminals shorted together */
@@ -105,6 +103,4 @@ void motor_brake(void)
 		pwm_set_pulse_dt(&pwm[s], 0);
 		write_dir(s, false);
 	}
-
-	gpio_pin_toggle_dt(&tp_pwm_set);
 }

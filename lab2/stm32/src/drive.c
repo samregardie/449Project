@@ -6,9 +6,13 @@
  * thread is the only code that writes to the motors: every ENCODER_SAMPLE_MS
  * it samples the encoders, reads the request and either brakes or runs the
  * controller. A 1 ms period keeps command -> PWM_SET under the 2 ms limit.
+ *
+ * PWM_SET toggles only on the tick that first applies a new command, so
+ * CMD_RX -> PWM_SET on the scope is the software response time.
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/drivers/gpio.h>
 
 #include "drive.h"
 #include "encoder.h"
@@ -23,6 +27,10 @@ static struct k_spinlock lock;
 static int32_t throttle;	/* -MOTOR_DUTY_MAX..MOTOR_DUTY_MAX */
 static bool brake;
 static bool error = true;	/* power-up is the error state */
+static uint32_t seq;		/* bumped on every command or error change */
+
+static const struct gpio_dt_spec tp_pwm_set =
+	GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), pwm_set_gpios);
 
 /* TODO (team): PID state, reset whenever the motors are braked */
 static void pid_reset(void)
@@ -44,6 +52,8 @@ static void control_loop(void *p1, void *p2, void *p3)
 	k_sem_take(&start_sem, K_FOREVER);
 	k_timer_start(&loop_timer, K_MSEC(ENCODER_SAMPLE_MS), K_MSEC(ENCODER_SAMPLE_MS));
 
+	uint32_t applied_seq = 0;
+
 	while (1) {
 		k_timer_status_sync(&loop_timer);
 		encoder_sample();
@@ -51,20 +61,26 @@ static void control_loop(void *p1, void *p2, void *p3)
 		k_spinlock_key_t key = k_spin_lock(&lock);
 		int32_t t = throttle;
 		bool stop = brake || error;
+		uint32_t s = seq;
 
 		k_spin_unlock(&lock, key);
 
 		if (stop) {
 			motor_brake();
 			pid_reset();
-			continue;
+		} else {
+			/* TODO: average of both sides once the right encoder works */
+			int32_t duty = pid_update(t, encoder_velocity(SIDE_LEFT));
+
+			motor_set(SIDE_LEFT, duty);
+			motor_set(SIDE_RIGHT, duty);
 		}
 
-		/* TODO: average of both sides once the right encoder works */
-		int32_t duty = pid_update(t, encoder_velocity(SIDE_LEFT));
-
-		motor_set(SIDE_LEFT, duty);
-		motor_set(SIDE_RIGHT, duty);
+		/* First write after a new command: mark it for the scope */
+		if (s != applied_seq) {
+			gpio_pin_toggle_dt(&tp_pwm_set);
+			applied_seq = s;
+		}
 	}
 }
 
@@ -76,6 +92,15 @@ int drive_init(void)
 	/* Motors first, so they're braked before anything else runs */
 	int ret = motor_init();
 
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (!gpio_is_ready_dt(&tp_pwm_set)) {
+		return -ENODEV;
+	}
+
+	ret = gpio_pin_configure_dt(&tp_pwm_set, GPIO_OUTPUT_INACTIVE);
 	if (ret < 0) {
 		return ret;
 	}
@@ -97,6 +122,7 @@ void drive_command(int32_t new_throttle, bool new_brake)
 	if (!error) {
 		throttle = CLAMP(new_throttle, -MOTOR_DUTY_MAX, MOTOR_DUTY_MAX);
 		brake = new_brake;
+		seq++;
 	}
 
 	k_spin_unlock(&lock, key);
@@ -107,6 +133,7 @@ void drive_set_error(bool new_error)
 	k_spinlock_key_t key = k_spin_lock(&lock);
 
 	error = new_error;
+	seq++;
 
 	/* Leaving the error state starts from a standstill */
 	throttle = 0;
