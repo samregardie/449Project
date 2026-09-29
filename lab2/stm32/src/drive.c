@@ -11,6 +11,8 @@
  * CMD_RX -> PWM_SET on the scope is the software response time.
  */
 
+#include <stdlib.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 
@@ -32,15 +34,49 @@ static uint32_t seq;		/* bumped on every command or error change */
 static const struct gpio_dt_spec tp_pwm_set =
 	GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), pwm_set_gpios);
 
-/* TODO (team): PID state, reset whenever the motors are braked */
+/* Linear, monotonic: full throttle = 30 ticks per 10 ms (~40% of the measured max) */
+#define MAX_VELOCITY 30.0f
+#define THROTTLE_DEADBAND 5	/* |cmd| below this means 0 */
+
+/* TODO (team): tune. Start with KI = 0 and raise KP, then add KI */
+#define KP 0.0f
+#define KI 0.0f
+
+#define DT (ENCODER_SAMPLE_MS / 1000.0f)	/* seconds per update */
+
+/* Only touched by the control thread */
+static float integral;
+
+/* Called on every braked tick, so releasing the brake doesn't lurch */
 static void pid_reset(void)
 {
+	integral = 0.0f;
 }
 
-/* TODO (team): throttle -> target velocity, then PID. Open loop for now. */
+static float throttle_to_target(int32_t cmd)
+{
+	if (abs(cmd) < THROTTLE_DEADBAND) {
+		return 0.0f;
+	}
+
+	return cmd * MAX_VELOCITY / MOTOR_DUTY_MAX;
+}
+
+/* PI on velocity (ticks per 10 ms); returns the duty */
 static int32_t pid_update(int32_t cmd, int32_t velocity)
 {
-	return cmd;
+	float error = throttle_to_target(cmd) - velocity;
+	float out = KP * error + KI * integral;
+
+	/* Anti-windup: stop integrating while saturated and error pushes further */
+	bool saturated = (out >= MOTOR_DUTY_MAX && error > 0) ||
+			 (out <= -MOTOR_DUTY_MAX && error < 0);
+
+	if (!saturated) {
+		integral += error * DT;
+	}
+
+	return (int32_t)CLAMP(out, -MOTOR_DUTY_MAX, MOTOR_DUTY_MAX);
 }
 
 K_SEM_DEFINE(start_sem, 0, 1);
