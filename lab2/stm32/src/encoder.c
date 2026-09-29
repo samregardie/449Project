@@ -48,7 +48,6 @@ static const int8_t step[16] = {
 
 /* Read by threads, so atomic */
 static atomic_t count[2];
-static atomic_t invalid[2];	/* both pins changed: an edge was missed */
 
 /*
  * Only touched by that side's ISRs, which can't preempt each other as long as
@@ -76,13 +75,11 @@ static void on_edge(const struct device *port, struct gpio_callback *cb, gpio_po
 	uint8_t cur = read_state(s);
 	int8_t delta = step[(prev[s] << 2) | cur];
 
+	prev[s] = cur;
+
 	if (delta != 0) {
 		atomic_add(&count[s], reversed[s] ? -delta : delta);
-	} else if (cur != prev[s]) {
-		atomic_inc(&invalid[s]);
 	}
-
-	prev[s] = cur;
 }
 
 int encoder_init(void)
@@ -130,11 +127,6 @@ int encoder_init(void)
 int32_t encoder_count(enum side s)
 {
 	return atomic_get(&count[s]);
-}
-
-int32_t encoder_errors(enum side s)
-{
-	return atomic_get(&invalid[s]);
 }
 
 /*

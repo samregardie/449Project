@@ -17,4 +17,13 @@ void drive_command(int32_t throttle, bool brake);
 /* true = fail-safe (braked, commands ignored), false = back to normal */
 void drive_set_error(bool error);
 
+/* The latest control-loop tick */
+struct drive_status {
+	float target;		/* ticks per 10 ms */
+	float velocity;		/* ticks per 10 ms, average of both wheels */
+	int32_t duty;		/* 0 while braked */
+};
+
+struct drive_status drive_get_status(void);
+
 #endif

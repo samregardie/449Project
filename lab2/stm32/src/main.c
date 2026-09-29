@@ -1,7 +1,7 @@
 /*
- * Encoder resolution test: runs both motors at a few duties and prints the
- * ticks per WINDOW_MS window (mean, min, max). Wheels off the ground.
- * Watch the console (115200 baud on the ST-Link USB port).
+ * PI tuning: holds TUNE_THROTTLE and prints "target_x10,velocity_x10,duty"
+ * every 20 ms. Graph it live with pid_live.py and load the wheel by hand.
+ * Wheels off the ground (or on the floor once it's stable).
  */
 
 #include <zephyr/kernel.h>
@@ -10,69 +10,7 @@
 #include "drive.h"
 
 // TESTING ONLY - REMOVE
-#include "encoder.h"
-#include "motor.h"
-
-#define PAST_LEFT  (-2 * BLINKER_TURN_THRESHOLD)
-#define PAST_RIGHT (2 * BLINKER_TURN_THRESHOLD)
-
-// // TESTING ONLY - REMOVE
-// #define WINDOW_MS 10
-// #define N_WINDOWS 100
-
-// static int16_t d_left[N_WINDOWS], d_right[N_WINDOWS];
-// static const int32_t duties[] = { 100, 250, 500, 750, 1000 };
-
-// K_TIMER_DEFINE(window_timer, NULL, NULL);
-
-// static void stats(const char *name, const int16_t *d)
-// {
-// 	int32_t sum = 0, min = INT16_MAX, max = INT16_MIN;
-
-// 	for (int i = 0; i < N_WINDOWS; i++) {
-// 		sum += d[i];
-// 		min = MIN(min, d[i]);
-// 		max = MAX(max, d[i]);
-// 	}
-
-// 	printk("  %-5s mean %4d  min %4d  max %4d  (%d ticks/s)\n", name,
-// 	       sum / N_WINDOWS, min, max, sum * (1000 / WINDOW_MS) / N_WINDOWS);
-// }
-
-// static void resolution_test(void)
-// {
-// 	for (int k = 0; k < ARRAY_SIZE(duties); k++) {
-// 		motor_set(SIDE_LEFT, duties[k]);
-// 		motor_set(SIDE_RIGHT, duties[k]);
-// 		k_msleep(1000);	/* let the speed settle */
-
-// 		int32_t last_l = encoder_count(SIDE_LEFT);
-// 		int32_t last_r = encoder_count(SIDE_RIGHT);
-
-// 		/* Store now, print later: printk would stretch the windows */
-// 		k_timer_start(&window_timer, K_MSEC(WINDOW_MS), K_MSEC(WINDOW_MS));
-// 		for (int i = 0; i < N_WINDOWS; i++) {
-// 			k_timer_status_sync(&window_timer);
-
-// 			int32_t l = encoder_count(SIDE_LEFT);
-// 			int32_t r = encoder_count(SIDE_RIGHT);
-
-// 			d_left[i] = l - last_l;
-// 			d_right[i] = r - last_r;
-// 			last_l = l;
-// 			last_r = r;
-// 		}
-// 		k_timer_stop(&window_timer);
-
-// 		printk("duty %d:\n", duties[k]);
-// 		stats("left", d_left);
-// 		stats("right", d_right);
-// 	}
-
-// 	motor_brake();
-// 	printk("done, missed edges: left %d  right %d\n",
-// 	       encoder_errors(SIDE_LEFT), encoder_errors(SIDE_RIGHT));
-// }
+#define TUNE_THROTTLE 500
 
 int main(void)
 {
@@ -87,11 +25,16 @@ int main(void)
 		return 0;
 	}
 
-	while (1) {
-		printk("%d\n", encoder_count(SIDE_LEFT));
-		printk("%d\n", encoder_count(SIDE_RIGHT));
+	// TESTING ONLY - REMOVE
+	drive_set_error(false);
+	drive_command(TUNE_THROTTLE, false);
 
-		k_msleep(30);
+	while (1) {
+		struct drive_status s = drive_get_status();
+
+		/* printk has no %f, so x10 */
+		printk("%d,%d,%d\n", (int)(s.target * 10), (int)(s.velocity * 10), s.duty);
+		k_msleep(20);
 	}
 
 	return 0;
