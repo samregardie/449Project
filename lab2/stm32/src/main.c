@@ -1,6 +1,7 @@
 /*
- * Encoder test: prints both counts every 200 ms. Spin each wheel by hand.
- * Watch the console (115200 baud on the ST-Link USB port).
+ * PI tuning: holds TUNE_THROTTLE and prints "target_x10,velocity_x10,duty"
+ * every 20 ms. Graph it live with pid_live.py and load the wheel by hand.
+ * Wheels off the ground (or on the floor once it's stable).
  */
 
 #include <zephyr/kernel.h>
@@ -9,11 +10,7 @@
 #include "drive.h"
 
 // TESTING ONLY - REMOVE
-#include "encoder.h"
-#include "motor.h"
-
-#define PAST_LEFT  (-2 * BLINKER_TURN_THRESHOLD)
-#define PAST_RIGHT (2 * BLINKER_TURN_THRESHOLD)
+#define TUNE_THROTTLE 500
 
 int main(void)
 {
@@ -29,10 +26,15 @@ int main(void)
 	}
 
 	// TESTING ONLY - REMOVE
+	drive_set_error(false);
+	drive_command(TUNE_THROTTLE, false);
+
 	while (1) {
-		printk("left %6d  right %6d\n",
-		       encoder_count(SIDE_LEFT), encoder_count(SIDE_RIGHT));
-		k_msleep(200);
+		struct drive_status s = drive_get_status();
+
+		/* printk has no %f, so x10 */
+		printk("%d,%d,%d\n", (int)(s.target * 10), (int)(s.velocity * 10), s.duty);
+		k_msleep(20);
 	}
 
 	return 0;

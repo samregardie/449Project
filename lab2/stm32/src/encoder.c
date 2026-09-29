@@ -5,6 +5,9 @@
  * mode isn't available: count edges in GPIO interrupts instead. Every edge of
  * A and B interrupts, and a lookup table turns the old and new A/B state into
  * +1, -1 or 0 (no change, or an invalid jump where both pins changed).
+ *
+ * The pins use EXTI lines 7-10. STM32 has one EXTI line per pin number across
+ * all ports, so no other interrupt pin can be pin 7-10 on any port.
  */
 
 #include <zephyr/kernel.h>
@@ -46,11 +49,19 @@ static const int8_t step[16] = {
 /* Read by threads, so atomic */
 static atomic_t count[2];
 
-/* Only touched by that side's ISRs, which can't preempt each other */
+/*
+ * Only touched by that side's ISRs, which can't preempt each other as long as
+ * EXTI9_5 and EXTI15_10 keep the same priority
+ */
 static uint8_t prev[2];
 
 /* A and B of one encoder are on different ports: one callback per pin */
-static struct gpio_callback callbacks[4];	/* [side * 2 + 0] = A, + 1 = B */
+struct enc_cb {
+	struct gpio_callback cb;
+	enum side s;
+};
+
+static struct enc_cb callbacks[4];
 
 static uint8_t read_state(enum side s)
 {
@@ -60,7 +71,7 @@ static uint8_t read_state(enum side s)
 /* Runs in ISR context: two pin reads and an atomic add, nothing else */
 static void on_edge(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
 {
-	enum side s = (cb - callbacks) / 2;
+	enum side s = CONTAINER_OF(cb, struct enc_cb, cb)->s;
 	uint8_t cur = read_state(s);
 	int8_t delta = step[(prev[s] << 2) | cur];
 
@@ -95,9 +106,10 @@ int encoder_init(void)
 	prev[SIDE_RIGHT] = read_state(SIDE_RIGHT);
 
 	for (int i = 0; i < ARRAY_SIZE(pins); i++) {
-		gpio_init_callback(&callbacks[i], on_edge, BIT(pins[i]->pin));
+		callbacks[i].s = (i < 2) ? SIDE_LEFT : SIDE_RIGHT;
+		gpio_init_callback(&callbacks[i].cb, on_edge, BIT(pins[i]->pin));
 
-		int ret = gpio_add_callback_dt(pins[i], &callbacks[i]);
+		int ret = gpio_add_callback_dt(pins[i], &callbacks[i].cb);
 
 		if (ret < 0) {
 			return ret;
@@ -117,12 +129,27 @@ int32_t encoder_count(enum side s)
 	return atomic_get(&count[s]);
 }
 
+/*
+ * Only the control thread calls encoder_sample() and encoder_velocity(), so
+ * these need no lock. history[s][oldest] is the count from one window ago.
+ */
+static int32_t history[2][ENCODER_WINDOW];
+static int32_t velocity[2];
+static int oldest;
+
+void encoder_sample(void)
+{
+	for (int s = 0; s < 2; s++) {
+		int32_t now = atomic_get(&count[s]);
+
+		velocity[s] = now - history[s][oldest];
+		history[s][oldest] = now;
+	}
+
+	oldest = (oldest + 1) % ENCODER_WINDOW;
+}
+
 int32_t encoder_velocity(enum side s)
 {
-	/*
-	 * TODO (team): either the change in encoder_count() over a fixed period,
-	 * or the time between edges (k_cycle_get_32() in on_edge()). Think about
-	 * low speed with each.
-	 */
-	return 0;
+	return velocity[s];
 }
