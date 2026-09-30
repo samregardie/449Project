@@ -24,6 +24,14 @@
 	status = "disabled";
 };
 
+// UART 6 for com with pi in lab2
+&usart6 {
+    pinctrl-0 = <&usart6_tx_pa11 &usart6_rx_pa12>;
+    pinctrl-names = "default";
+    current-speed = <115200>;
+    status = "okay";
+};
+
 &pwm2 {		/* D13 */
 	status = "disabled";
 };
