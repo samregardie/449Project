@@ -4,7 +4,7 @@
  * One bit per cause, since each has its own exit rule. Outputs change only
  * when the mask goes between zero and non-zero, and are set under the lock
  * so the link timer ISR can't interleave. Lock order: errorstate, then
- * drive/blinker.
+ * drive/blinker/servo.
  *
  * The link timer is not started at power-up; ERR_POWERUP covers that.
  */
@@ -14,9 +14,10 @@
 #include "blinker.h"
 #include "drive.h"
 #include "errorstate.h"
+#include "servo.h"
 
 static struct k_spinlock lock;
-static uint32_t causes = ERR_POWERUP;	/* drive and blinker also start in error */
+static uint32_t causes = ERR_POWERUP;	/* drive, blinker and servo also start in error */
 
 static void update_error_causes(uint32_t set, uint32_t clear)
 {
@@ -30,7 +31,7 @@ static void update_error_causes(uint32_t set, uint32_t clear)
 	if (is_error != was_error) {
 		drive_set_error(is_error);
 		blinker_set_error(is_error);
-		/* TODO: servo safe position once servo.c exists */
+		servo_set_error(is_error);
 	}
 
 	k_spin_unlock(&lock, key);
