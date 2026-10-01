@@ -111,8 +111,8 @@ int main()
   gpioSetMode(UDP_RX_GPIO, PI_INPUT); // Set GPIO2 as input.
   gpioSetMode(CMD_TX_GPIO, PI_INPUT); // Set GPIO3 as input.
 
-  gpioSet(UDP_RX_GPIO, PI_LOW);
-  gpioSet(CMD_TX_GPIO, PI_LOW);
+  gpioWrite(UDP_RX_GPIO, PI_HIGH);
+  gpioWrite(CMD_TX_GPIO, PI_LOW);
 
   int uart_fd = uart_open("/dev/serial0", UART_BAUD);
 
