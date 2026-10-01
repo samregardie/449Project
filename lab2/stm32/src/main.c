@@ -1,3 +1,4 @@
+#include <zephyr/kernel.h>
 
 #include "blinker.h"
 #include "drive.h"
@@ -31,11 +32,14 @@ int main(void)
 	drive_command(TUNE_THROTTLE, false);
 	picom_send("test\n");
 
-	while (1) {
-		struct drive_status s = drive_get_status();
+	uint8_t uart_packet[64];
 
-		/* printk has no %f, so x10 */
-		printk("%d,%d,%d\n", (int)(s.target * 10), (int)(s.velocity * 10), s.duty);
+	while (1) {
+		if (picom_read(uart_packet)) {
+			uart_packet[63] = 0;
+			picom_send(uart_packet);
+			printk("%s\n", uart_packet);
+		}
 		k_msleep(20);
 	}
 
