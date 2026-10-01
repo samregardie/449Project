@@ -108,8 +108,8 @@ int main()
 
   // Initialize GPIO
   gpioInitialise();
-  gpioSetMode(UDP_RX_GPIO, PI_INPUT); // Set GPIO2 as input.
-  gpioSetMode(CMD_TX_GPIO, PI_INPUT); // Set GPIO3 as input.
+  gpioSetMode(UDP_RX_GPIO, PI_OUTPUT); // Set GPIO2 as input.
+  gpioSetMode(CMD_TX_GPIO, PI_OUTPUT); // Set GPIO3 as input.
 
   gpioWrite(UDP_RX_GPIO, PI_LOW);
   gpioWrite(CMD_TX_GPIO, PI_LOW);
@@ -138,7 +138,7 @@ int main()
   pthread_t send_tid;
   pthread_create(&send_tid, NULL, send_force, NULL);
 
-  write(uart_fd, "Test from Pi\n", 13);
+  write(uart_fd, "Test from Pi\n\x7F", 14);
 
   while (1)
   {
@@ -159,8 +159,8 @@ int main()
     bool right_signal = state.rgbButtons[4];
     bool error_button = state.rgbButtons[1];
 
-    throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
-    brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
+    // throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
+    // brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
 
     printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
 
