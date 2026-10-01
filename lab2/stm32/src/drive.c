@@ -8,7 +8,9 @@
  * period keeps command -> PWM_SET under the 2 ms limit.
  *
  * PWM_SET toggles only on the tick that first applies a new command, so
- * CMD_RX -> PWM_SET on the scope is the software response time.
+ * CMD_RX -> PWM_SET on the scope is the software response time, for both
+ * throttle and brake. (DIR_A has no edge when braking from forward: forward
+ * and brake both hold DIR low.)
  */
 
 #include <stdlib.h>

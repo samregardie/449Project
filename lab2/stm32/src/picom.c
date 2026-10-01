@@ -5,10 +5,15 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/gpio.h>
 
 #include "picom.h"
 
 static const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
+
+/* Test point: toggles each time a 0x7F ends a command frame */
+static const struct gpio_dt_spec tp_cmd_rx =
+    GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), cmd_rx_gpios);
 
 K_MSGQ_DEFINE(rx_q, 64, 4, 4);   /* queue of complete lines */
 static char rx_buf[64];
@@ -29,6 +34,7 @@ static void uart_cb(const struct device *dev, void *user_data)
     }
     while (uart_fifo_read(dev, &c, 1) == 1) {
         if ((c == 127) && rx_pos > 0) {
+            gpio_pin_toggle_dt(&tp_cmd_rx);
             rx_buf[rx_pos] = 127;
             k_msgq_put(&rx_q, rx_buf, K_NO_WAIT);
             rx_pos = 0;
@@ -64,7 +70,10 @@ bool picom_read(char *output){
 
 int picom_init(void)
 {
-    if (!device_is_ready(uart)) {
+    if (!device_is_ready(uart) || !gpio_is_ready_dt(&tp_cmd_rx)) {
+        return 1;
+    }
+    if (gpio_pin_configure_dt(&tp_cmd_rx, GPIO_OUTPUT_INACTIVE) < 0) {
         return 1;
     }
     uart_irq_callback_user_data_set(uart, uart_cb, NULL);
