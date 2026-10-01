@@ -142,7 +142,7 @@ int main() {
     printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
 
     // Send data over uart
-    uint8_t buf[] = { steer, throttle, brake, left_signal, right_signal, error_button, 0x7F};
+    uint8_t buf[] = { steer, throttle, brake, left_signal, right_signal, error_button, '\n', 0x7F};
     write(uart_fd, buf, sizeof(buf));
     printf("%s\n", buf);
   }

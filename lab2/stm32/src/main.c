@@ -36,7 +36,6 @@ int main(void)
 	while (1) {
 		if (picom_read(uart_packet)) {
 			printk("packet recieved\n");
-			uart_packet[62] = '\n';
 			uart_packet[63] = 0x7F;
 			picom_send(uart_packet);
 			printk("%s\n", uart_packet);
