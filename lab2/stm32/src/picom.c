@@ -45,6 +45,23 @@ void picom_send(const char *s)
     }
 }
 
+/* Reads message from uart buffer. Returns if data was read. */
+bool picom_read(char *output){
+	uint8_t latest[64];
+	uint8_t tmp[64];
+	bool got_one = false;
+
+	while (k_msgq_get(&rx_q, tmp, K_NO_WAIT) == 0) {
+	    	memcpy(latest, tmp, sizeof(latest));
+	    	got_one = true;
+	}
+
+	if (got_one) {
+		memcpy(output, latest, sizeof(latest));
+	}	
+	return got_one;
+}
+
 int picom_init(void)
 {
     if (!device_is_ready(uart)) {
