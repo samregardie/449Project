@@ -111,7 +111,7 @@ int main()
   gpioSetMode(UDP_RX_GPIO, PI_INPUT); // Set GPIO2 as input.
   gpioSetMode(CMD_TX_GPIO, PI_INPUT); // Set GPIO3 as input.
 
-  gpioWrite(UDP_RX_GPIO, PI_HIGH);
+  gpioWrite(UDP_RX_GPIO, PI_LOW);
   gpioWrite(CMD_TX_GPIO, PI_LOW);
 
   int uart_fd = uart_open("/dev/serial0", UART_BAUD);
@@ -146,6 +146,7 @@ int main()
     int n, len;
     n = recvfrom(sockfd, recvbuf, STATE_SIZE, MSG_WAITALL,
                  (struct sockaddr *)&servaddr, &len);
+    gpioWrite(UDP_RX_GPIO, !gpioRead(UDP_RX_GPIO)); // Toggle the gpio when read complete
     uint32_t packet_ct = ((uint32_t *)recvbuf)[0];
     memcpy(&state, recvbuf + 4, sizeof(state));
     // printf("Receive state (Pkt: %8X) :  Wheel: %d | Throttle: %d | Brake: %d\n", packet_ct, state.lX, state.lY, state.lRz);
@@ -163,6 +164,7 @@ int main()
     // Send data over uart
     uint8_t buf[] = {steer, throttle, brake, left_signal, right_signal, error_button, '\n', 0x7F};
     write(uart_fd, buf, sizeof(buf));
+    gpioWrite(CMD_TX_GPIO, !gpioRead(CMD_TX_GPIO)); // Toggle the gpio on write
     printf("%s\n", buf);
   }
 
