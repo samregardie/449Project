@@ -1,8 +1,14 @@
+/*
+ * Encoder test: prints both counts every 200 ms. Spin each wheel by hand.
+ * Watch the console (115200 baud on the ST-Link USB port).
+ */
+
+#include <zephyr/kernel.h>
+#include <zephyr/sys/printk.h>
 
 #include "blinker.h"
 #include "drive.h"
-#include "errorstate.h"
-#include "servo.h"
+#include "current.h"
 
 
 
