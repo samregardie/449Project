@@ -28,8 +28,8 @@ static void uart_cb(const struct device *dev, void *user_data)
         return;
     }
     while (uart_fifo_read(dev, &c, 1) == 1) {
-        if ((c == '\n' || c == '\r') && rx_pos > 0) {
-            rx_buf[rx_pos] = '\0';
+        if ((c == 127) && rx_pos > 0) {
+            rx_buf[rx_pos] = 127;
             k_msgq_put(&rx_q, rx_buf, K_NO_WAIT);
             rx_pos = 0;
         } else if (rx_pos < sizeof(rx_buf) - 1) {
@@ -40,7 +40,7 @@ static void uart_cb(const struct device *dev, void *user_data)
 
 void picom_send(const char *s)
 {
-    while (*s) {
+    while (*s != 127) {
         uart_poll_out(uart, *s++);
     }
 }

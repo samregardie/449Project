@@ -28,9 +28,7 @@ int main(void)
 	}
 
 	// TESTING ONLY - REMOVE
-	drive_set_error(false);
-	drive_command(TUNE_THROTTLE, false);
-	picom_send("test\n\0");
+	picom_send("test\n\x7F");
 	printk("test\n");
 
 	uint8_t uart_packet[64];
@@ -38,7 +36,7 @@ int main(void)
 	while (1) {
 		if (picom_read(uart_packet)) {
 			printk("packet recieved\n");
-			uart_packet[63] = '\0';
+			uart_packet[63] = 0x7F;
 			picom_send(uart_packet);
 			printk("%s\n", uart_packet);
 		}

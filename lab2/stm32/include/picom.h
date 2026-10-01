@@ -8,7 +8,7 @@
 /* Configure the UART pins and start */
 int picom_init(void);
 
-/* Send null terminated char * over picom link */
+/* Send char * terminated by 0x7F byte over picom link */
 void picom_send(const char *s);
 
 /*
