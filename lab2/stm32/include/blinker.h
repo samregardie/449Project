@@ -4,11 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/*
- * Steering is signed: 0 = centre, negative = left.
- * Placeholder until the team picks a threshold in wheel units.
- */
-#define BLINKER_TURN_THRESHOLD 1000
+/* Steering is -100..100 (see servo.h); 30 = 30% of full lock */
+#define BLINKER_TURN_THRESHOLD 30
 
 /* Configure the LED pins and start in the error state (hazards) */
 int blinker_init(void);
