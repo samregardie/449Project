@@ -84,8 +84,8 @@
 
 /*
  * Current sensors: A1 = PA1 (I_Right), A2 = PA4 (I_Left), A3 = PB0 (I_Servo).
- * Longest sample time, because the 4.7k/4.7k dividers are a high-impedance
- * source.
+ * Sensor outputs go straight to the pins (no dividers). Longest sample time
+ * for the most settled reading.
  */
 &adc1 {
 	#address-cells = <1>;

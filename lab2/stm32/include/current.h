@@ -1,10 +1,11 @@
 #ifndef CURRENT_H
 #define CURRENT_H
 
+// Same order as io-channels in app.overlay: i_right, i_left, i_servo
 enum current_sensor
 {
-    MOTOR_LEFT = 0,
-    MOTOR_RIGHT = 1,
+    MOTOR_RIGHT = 0,
+    MOTOR_LEFT = 1,
     SERVO = 2
 };
 

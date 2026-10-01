@@ -20,8 +20,58 @@ static const struct adc_dt_spec adc_channels[] = {
     DT_FOREACH_PROP_ELEM(DT_PATH(zephyr_user), io_channels,
                          DT_SPEC_AND_COMMA_FOR_INPUTS)};
 
-// Storing the initial reading of the adc with 0 current
-static int initial_readings[3];
+// Sensor is 185 mV/A, wired straight to the ADC pin (no divider)
+#define SENSOR_MV_PER_A 185
+
+// Readings averaged per call, to cut the sensor and PWM noise
+#define SAMPLES 16
+
+// Sum of SAMPLES readings at 0 A, per channel (mV)
+static int32_t zero_sum_mv[3];
+
+// Read one channel in mV. Returns 0, or a negative error from the ADC driver.
+static int read_mv(size_t i, int32_t *mv)
+{
+    uint32_t buf = 0;
+
+    struct adc_sequence sequence = {
+        .buffer = &buf,
+        /* buffer size in bytes, not number of samples */
+        .buffer_size = sizeof(buf),
+    };
+
+    (void)adc_sequence_init_dt(&adc_channels[i], &sequence);
+
+    int err = adc_read_dt(&adc_channels[i], &sequence);
+
+    if (err < 0)
+    {
+        return err;
+    }
+
+    *mv = (int32_t)buf;
+    return adc_raw_to_millivolts_dt(&adc_channels[i], mv);
+}
+
+// Sum of SAMPLES readings of one channel (mV). Returns 0 or a negative error.
+static int read_sum_mv(size_t i, int32_t *sum)
+{
+    *sum = 0;
+
+    for (int k = 0; k < SAMPLES; k++)
+    {
+        int32_t mv;
+        int err = read_mv(i, &mv);
+
+        if (err < 0)
+        {
+            return err;
+        }
+        *sum += mv;
+    }
+
+    return 0;
+}
 
 int current_sense_init(void)
 {
@@ -43,25 +93,13 @@ int current_sense_init(void)
             return 1;
         }
 
-        uint32_t buf = 0;
-
-        struct adc_sequence sequence = {
-            .buffer = &buf,
-            /* buffer size in bytes, not number of samples */
-            .buffer_size = sizeof(buf),
-        };
-        int err;
-
-        (void)adc_sequence_init_dt(&adc_channels[i], &sequence);
-
-        err = adc_read_dt(&adc_channels[i], &sequence);
-
-        int32_t val_mv = (int32_t)buf;
-
-        err = adc_raw_to_millivolts_dt(&adc_channels[i],
-                                       &val_mv);
-
-        initial_readings[i] = val_mv;
+        // Assumes no current is flowing at power-up
+        err = read_sum_mv(i, &zero_sum_mv[i]);
+        if (err < 0)
+        {
+            printk("Could not read channel #%d (%d)\n", i, err);
+            return 1;
+        }
     }
 
     printk("ADC successfully setup\n");
@@ -71,37 +109,19 @@ int current_sense_init(void)
 // Return the current passing through the given sensor, rounded to the
 // nearest mA.
 // Note that current can be negative based on direction.
+// Returns 0 if the read fails; no printk, since this runs every 20 ms.
 int get_current(enum current_sensor sensor)
 {
-    uint32_t buf = 0;
+    int32_t sum_mv;
 
-    struct adc_sequence sequence = {
-        .buffer = &buf,
-        /* buffer size in bytes, not number of samples */
-        .buffer_size = sizeof(buf),
-    };
-    int err;
-
-    (void)adc_sequence_init_dt(&adc_channels[sensor], &sequence);
-
-    err = adc_read_dt(&adc_channels[sensor], &sequence);
-
-    int32_t val_mv = (int32_t)buf;
-
-    err = adc_raw_to_millivolts_dt(&adc_channels[sensor],
-                                   &val_mv);
-
-    if (err < 0)
+    if (read_sum_mv(sensor, &sum_mv) < 0)
     {
-        printk("Could not read (%d)\n", err);
-        // TODO: enter error state
+        return 0;
     }
 
-    val_mv -= initial_readings[sensor];
-
-    // Sensor has 185 mV/A sensitivity
-    // Multiply mV by 0.005405 ~= 173 >> 5
-    return (val_mv * 173) >> 5;
+    // mV -> mA, then divide out the SAMPLES sum
+    return (sum_mv - zero_sum_mv[sensor]) * 1000 /
+           (SENSOR_MV_PER_A * SAMPLES);
 }
 
 int print_all_currents(void)
