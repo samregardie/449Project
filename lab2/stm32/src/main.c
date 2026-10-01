@@ -21,15 +21,5 @@ int main(void)
 		return 1;
 	}
 
-	while (1) {
-		printk("I (+/-100 = +/-%d mA): L=%d R=%d S=%d  err=0x%x\n",
-		       CURRENT_FULL_SCALE_MA,
-		       status_scale_current(get_current(MOTOR_LEFT)),
-		       status_scale_current(get_current(MOTOR_RIGHT)),
-		       status_scale_current(get_current(SERVO)),
-		       errorstate_causes());
-		k_msleep(500);
-	}
-
 	return 0;
 }

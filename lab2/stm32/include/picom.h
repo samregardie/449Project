@@ -12,6 +12,12 @@ int picom_init(void);
 void picom_send(const char *s);
 
 /*
+ * Blocks until the next message arrives and copies it (64 chars, ending in
+ * 0x7F) to output. For the parser thread; don't mix with picom_read().
+ */
+void picom_wait(char *output);
+
+/*
  * Copies the most recent 64 char message from uart buffer to output. 
  * Deletes all messages from uart buffer. Returns if any message was found.
  */

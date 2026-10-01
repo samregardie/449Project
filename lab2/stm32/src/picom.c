@@ -33,11 +33,14 @@ static void uart_cb(const struct device *dev, void *user_data)
         return;
     }
     while (uart_fifo_read(dev, &c, 1) == 1) {
-        if ((c == 127) && rx_pos > 0) {
-            gpio_pin_toggle_dt(&tp_cmd_rx);
-            rx_buf[rx_pos] = 127;
-            k_msgq_put(&rx_q, rx_buf, K_NO_WAIT);
-            rx_pos = 0;
+        if (c == 127) {
+            /* 0x7F is never data: an empty frame (e.g. a doubled 0x7F) is dropped */
+            if (rx_pos > 0) {
+                gpio_pin_toggle_dt(&tp_cmd_rx);
+                rx_buf[rx_pos] = 127;
+                k_msgq_put(&rx_q, rx_buf, K_NO_WAIT);
+                rx_pos = 0;
+            }
         } else if (rx_pos < sizeof(rx_buf) - 1) {
             rx_buf[rx_pos++] = c;
         }
@@ -49,6 +52,12 @@ void picom_send(const char *s)
     while (*s != 127) {
         uart_poll_out(uart, *s++);
     }
+}
+
+/* Blocks until the next complete message, then copies it to output. */
+void picom_wait(char *output)
+{
+	k_msgq_get(&rx_q, output, K_FOREVER);
 }
 
 /* Reads message from uart buffer. Returns if data was read. */
