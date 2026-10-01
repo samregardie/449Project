@@ -117,8 +117,8 @@ static void control_loop(void *p1, void *p2, void *p3)
 	}
 }
 
-/* Cooperative: each tick runs to completion, only ISRs can interrupt it */
-K_THREAD_DEFINE(drive_thread, 1024, control_loop, NULL, NULL, NULL, K_PRIO_COOP(2), 0, 0);
+/* Preemptive: higher-priority threads and ISRs can interrupt a tick */
+K_THREAD_DEFINE(drive_thread, 1024, control_loop, NULL, NULL, NULL, K_PRIO_PREEMPT(2), 0, 0);
 
 int drive_init(void)
 {
