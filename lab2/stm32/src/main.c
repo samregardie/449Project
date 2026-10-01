@@ -1,7 +1,9 @@
 #include <zephyr/kernel.h>
+#include <zephyr/sys/printk.h>
 
 #include "blinker.h"
 #include "drive.h"
+#include "current.h"
 #include "errorstate.h"
 #include "servo.h"
 #include "picom.h"
