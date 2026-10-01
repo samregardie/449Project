@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
+#include <stdbool.h>
 
 #include <stdio.h> 
 #include <stdlib.h> 
@@ -20,7 +21,7 @@
 #define LOCAL_HOST "172.26.166.54" // IP of local interface
 #define R_PORT 8000
 
-#define REMOTE_HOST "172.26.27.234"
+#define REMOTE_HOST "172.26.99.234"
 #define S_PORT 8001
 /** **/
 
@@ -119,6 +120,8 @@ int main() {
   pthread_t send_tid;
   pthread_create(&send_tid, NULL, send_force, NULL);
 
+  write(uart_fd, "Test from Pi\n", 13);
+
   while(1) {
     //printf("Wait recv\n");
     int n, len;
@@ -126,7 +129,7 @@ int main() {
                   (struct sockaddr *) &servaddr, &len);
     uint32_t packet_ct = ((uint32_t*) recvbuf)[0];
     memcpy(&state, recvbuf + 4, sizeof(state));
-    printf("Receive state (Pkt: %8X) :  Wheel: %d | Throttle: %d | Brake: %d\n", packet_ct, state.lX, state.lY, state.lRz);
+    // printf("Receive state (Pkt: %8X) :  Wheel: %d | Throttle: %d | Brake: %d\n", packet_ct, state.lX, state.lY, state.lRz);
     
     // Data scaling for stm32
     int8_t steer = state.lX / ((MAG_INT16_MIN + 99) / 100);	// Denominator is division by 100 but always round up
@@ -136,9 +139,12 @@ int main() {
     bool right_signal = state.rgbButtons[4];
     bool error_button = state.rgbButtons[1];
 
+    printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
+
     // Send data over uart
-    uint8_t buf[] = { steer, throttle, brake, left_signal, right_signal, error_button, '\0'};
+    uint8_t buf[] = { steer, throttle, brake, left_signal, right_signal, error_button, 0x7F};
     write(uart_fd, buf, sizeof(buf));
+    printf("%s\n", buf);
   }
 
   return 0;
