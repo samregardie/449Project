@@ -159,8 +159,8 @@ int main()
     bool right_signal = state.rgbButtons[4];
     bool error_button = state.rgbButtons[1];
 
-    throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
-    brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
+    // throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
+    // brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
 
     printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
 
