@@ -33,14 +33,14 @@ int current_sense_init(void)
         if (!adc_is_ready_dt(&adc_channels[i]))
         {
             printk("ADC controller device %s not ready\n", adc_channels[i].dev->name);
-            return 0;
+            return 1;
         }
 
         err = adc_channel_setup_dt(&adc_channels[i]);
         if (err < 0)
         {
             printk("Could not setup channel #%d (%d)\n", i, err);
-            return 0;
+            return 1;
         }
 
         uint32_t buf = 0;
@@ -65,7 +65,7 @@ int current_sense_init(void)
     }
 
     printk("ADC successfully setup\n");
-    return 1;
+    return 0;
 }
 
 // Return the current passing through the given sensor, rounded to the

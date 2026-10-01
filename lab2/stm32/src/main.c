@@ -8,24 +8,14 @@
 #include "servo.h"
 #include "picom.h"
 
-
-
 int main(void)
 {
-	/* All start in the error state: hazards, braked, servo centred */
-	if (blinker_init() < 0 || drive_init() < 0 || servo_init() < 0) {
+	if (current_sense_init() != 0 || 
+		drive_init() != 0 || 
+		blinker_init() != 0 || 
+		servo_init() != 0 ||
+		picom_init() != 0) {
 		printk("init failed\n");
-		return 0;
-	}
-
-	/* Brakes both motors, then sets up the encoders */
-	if (drive_init() < 0) {
-		printk("drive_init failed\n");
-		return 0;
-	}
-
-	if (picom_init() != 0) {
-		printk("picom_init failed\n");
 		return 1;
 	}
 
