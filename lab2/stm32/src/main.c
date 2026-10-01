@@ -31,11 +31,13 @@ int main(void)
 	drive_set_error(false);
 	drive_command(TUNE_THROTTLE, false);
 	picom_send("test\n\0");
+	printk("test\n");
 
 	uint8_t uart_packet[64];
 
 	while (1) {
 		if (picom_read(uart_packet)) {
+			printk("packet recieved\n");
 			uart_packet[63] = '\0';
 			picom_send(uart_packet);
 			printk("%s\n", uart_packet);
