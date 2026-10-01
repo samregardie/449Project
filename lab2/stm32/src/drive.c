@@ -22,7 +22,7 @@
 
 /* Linear: full throttle = 30 ticks per 10 ms (~40% of the measured max) */
 #define MAX_VELOCITY 30.0f
-#define THROTTLE_DEADBAND 5	/* |throttle| below this means 0 */
+#define THROTTLE_DEADBAND 2	/* |throttle| below this (i.e. +/-1%) means 0 */
 
 /* PI gains: velocity error (ticks per 10 ms) -> duty. TODO (team): tune */
 #define KP 20.0f
@@ -50,7 +50,7 @@ static float throttle_to_target(int32_t t)
 		return 0.0f;
 	}
 
-	return t * MAX_VELOCITY / MOTOR_DUTY_MAX;
+	return t * MAX_VELOCITY / DRIVE_THROTTLE_MAX;
 }
 
 static int32_t pi_update(float target, float velocity)
@@ -153,7 +153,7 @@ void drive_command(int32_t new_throttle, bool new_brake)
 
 	/* Ignored in the error state */
 	if (!error) {
-		throttle = CLAMP(new_throttle, -MOTOR_DUTY_MAX, MOTOR_DUTY_MAX);
+		throttle = CLAMP(new_throttle, -DRIVE_THROTTLE_MAX, DRIVE_THROTTLE_MAX);
 		brake = new_brake;
 		seq++;
 	}

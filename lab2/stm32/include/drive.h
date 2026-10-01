@@ -4,13 +4,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Throttle: -100 = full reverse, 0 = stop, 100 = full forward */
+#define DRIVE_THROTTLE_MAX 100
+
 /* Start the velocity control loop; starts in the error state (braked) */
 int drive_init(void);
 
 /*
  * Call with every valid command from the Pi; brake beats throttle.
- * throttle: -MOTOR_DUTY_MAX..MOTOR_DUTY_MAX (clamped), positive = forward.
- * Safe to call from a thread or an ISR.
+ * Throttle clamped to -100..100. Safe to call from a thread or an ISR.
  */
 void drive_command(int32_t throttle, bool brake);
 

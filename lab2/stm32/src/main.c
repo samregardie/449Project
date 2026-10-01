@@ -2,16 +2,17 @@
 
 #include "blinker.h"
 #include "drive.h"
+#include "errorstate.h"
+#include "servo.h"
 #include "picom.h"
 
 
-// TESTING ONLY - REMOVE
-#define TUNE_THROTTLE 500
 
 int main(void)
 {
-	if (blinker_init() < 0) {
-		printk("blinker_init failed\n");
+	/* All start in the error state: hazards, braked, servo centred */
+	if (blinker_init() < 0 || drive_init() < 0 || servo_init() < 0) {
+		printk("init failed\n");
 		return 0;
 	}
 
