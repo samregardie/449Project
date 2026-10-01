@@ -108,8 +108,8 @@ int main()
 
   // Initialize GPIO
   gpioInitialise();
-  gpioSetMode(UDP_RX_GPIO, PI_INPUT); // Set GPIO2 as input.
-  gpioSetMode(CMD_TX_GPIO, PI_INPUT); // Set GPIO3 as input.
+  gpioSetMode(UDP_RX_GPIO, PI_OUTPUT); // Set GPIO2 as input.
+  gpioSetMode(CMD_TX_GPIO, PI_OUTPUT); // Set GPIO3 as input.
 
   gpioWrite(UDP_RX_GPIO, PI_LOW);
   gpioWrite(CMD_TX_GPIO, PI_LOW);
@@ -138,7 +138,7 @@ int main()
   pthread_t send_tid;
   pthread_create(&send_tid, NULL, send_force, NULL);
 
-  write(uart_fd, "Test from Pi\n", 13);
+  write(uart_fd, "Test from Pi\n\x7F", 14);
 
   while (1)
   {
