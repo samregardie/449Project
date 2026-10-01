@@ -20,6 +20,9 @@ static const struct adc_dt_spec adc_channels[] = {
     DT_FOREACH_PROP_ELEM(DT_PATH(zephyr_user), io_channels,
                          DT_SPEC_AND_COMMA_FOR_INPUTS)};
 
+// Storing the initial reading of the adc with 0 current
+static int initial_readings[3];
+
 int current_sense_init(void)
 {
     int err;
@@ -39,12 +42,66 @@ int current_sense_init(void)
             printk("Could not setup channel #%d (%d)\n", i, err);
             return 0;
         }
-    }
 
-    printk("ADC Channels:%d\n", (adc_channels[1]));
+        uint32_t buf = 0;
+
+        struct adc_sequence sequence = {
+            .buffer = &buf,
+            /* buffer size in bytes, not number of samples */
+            .buffer_size = sizeof(buf),
+        };
+        int err;
+
+        (void)adc_sequence_init_dt(&adc_channels[i], &sequence);
+
+        err = adc_read_dt(&adc_channels[i], &sequence);
+
+        int32_t val_mv = (int32_t)buf;
+
+        err = adc_raw_to_millivolts_dt(&adc_channels[i],
+                                       &val_mv);
+
+        initial_readings[i] = val_mv;
+    }
 
     printk("ADC successfully setup\n");
     return 1;
+}
+
+// Return the current passing through the given sensor, rounded to the
+// nearest mA.
+// Note that current can be negative based on direction.
+int get_current(enum current_sensor sensor)
+{
+    uint32_t buf = 0;
+
+    struct adc_sequence sequence = {
+        .buffer = &buf,
+        /* buffer size in bytes, not number of samples */
+        .buffer_size = sizeof(buf),
+    };
+    int err;
+
+    (void)adc_sequence_init_dt(&adc_channels[sensor], &sequence);
+
+    err = adc_read_dt(&adc_channels[sensor], &sequence);
+
+    int32_t val_mv = (int32_t)buf;
+
+    err = adc_raw_to_millivolts_dt(&adc_channels[sensor],
+                                   &val_mv);
+
+    if (err < 0)
+    {
+        printk("Could not read (%d)\n", err);
+        // TODO: enter error state
+    }
+
+    val_mv -= initial_readings[sensor];
+
+    // Sensor has 185 mV/A sensitivity
+    // Multiply mV by 0.005405 ~= 173 >> 5
+    return (val_mv * 173) >> 5;
 }
 
 int print_all_currents(void)
@@ -63,6 +120,7 @@ int print_all_currents(void)
 
     for (size_t i = 0U; i < ARRAY_SIZE(adc_channels); i++)
     {
+
         int32_t val_mv;
 
         /*
@@ -97,19 +155,11 @@ int print_all_currents(void)
         {
             val_mv = (int32_t)buf;
         }
-        printk("%" PRId32, val_mv);
+
         err = adc_raw_to_millivolts_dt(&adc_channels[i],
                                        &val_mv);
 
-        /* conversion to mV may not be supported, skip if not */
-        if (err < 0)
-        {
-            printk(" (value in mV not available)\n");
-        }
-        else
-        {
-            printk(" = %" PRId32 " mV\n", val_mv);
-        }
+        printk("%" PRId32, val_mv);
     }
 
     return 0;
