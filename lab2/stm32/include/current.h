@@ -1,3 +1,5 @@
+#ifndef CURRENT_H
+#define CURRENT_H
 
 enum current_sensor
 {
@@ -14,3 +16,5 @@ int print_all_currents(void);
 // nearest mA.
 // Note that current can be negative based on direction.
 int get_current(enum current_sensor sensor);
+
+#endif
