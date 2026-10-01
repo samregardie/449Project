@@ -1,0 +1,13 @@
+Anlog channels all i16 at pi
+0,1,2 -> steering, throttle, brake
+
+
+Left paddle -> btn 5
+Right paddle -> btn 4
+X -> 2
+Y -> 3
+A -> 0
+B -> 1
+
+LSB -> 9
+RSB -> 8
