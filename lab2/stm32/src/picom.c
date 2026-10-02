@@ -52,7 +52,7 @@ void picom_send(const char *s)
     while (*s != 127) {
         uart_poll_out(uart, *s++);
     }
-    uart_pull_out(uart, *s);
+    uart_poll_out(uart, *s);
 }
 
 /* Blocks until the next complete message, then copies it to output. */
