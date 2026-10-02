@@ -4,6 +4,7 @@
 #include <termios.h>
 #include <stdbool.h>
 #include <pigpio.h>
+#include <errno.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +23,7 @@
 #define LOCAL_HOST "172.26.166.54" // IP of local interface
 #define R_PORT 8000
 
-#define REMOTE_HOST "172.26.99.234"
+#define REMOTE_HOST "172.26.34.95"
 #define S_PORT 8001
 /** **/
 
@@ -54,12 +55,12 @@ void *send_force(void *arg)
     exit(EXIT_FAILURE);
   }
 
-  uint8_t frame[16];
+  int8_t frame[16];
   size_t len = 0;
 
   while (1)
   {
-    uint8_t byte;
+    int8_t byte;
     ssize_t n = read(uart_fd, &byte, 1);
 
     if (n < 0)
@@ -77,7 +78,7 @@ void *send_force(void *arg)
     if (byte == 0x7F) {
       if (len == STATUS_FRAME_LEN) {
         int8_t force = (int8_t)frame[2];
-        printf("Motor Left: %d, Motor Right: %d, Servo: %d, Status: %b\n", frame[0], frame[1], force, frame[3]);
+        printf("Motor Left: %d, Motor Right: %d, Servo: %d, Status: %08b\n", frame[0], frame[1], force, frame[3]);
         //sendto(sockfd, &force, 1, 0,
         //       (struct sockaddr *)&servaddr, sizeof(servaddr));
       }
@@ -187,13 +188,13 @@ int main()
     // throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
     // brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
 
-    printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
+    //printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
 
     // Send data over uart
     uint8_t buf[] = {steer, throttle, brake, left_signal, right_signal, error_button, '\n', 0x7F};
     write(uart_fd, buf, sizeof(buf));
     gpioWrite(CMD_TX_GPIO, !gpioRead(CMD_TX_GPIO)); // Toggle the gpio on write
-    printf("%s\n", buf);
+    //printf("%s\n", buf);
   }
 
   return 0;
