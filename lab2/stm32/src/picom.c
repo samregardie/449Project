@@ -49,6 +49,7 @@ void picom_send(const char *s)
     while (*s != 127) {
         uart_poll_out(uart, *s++);
     }
+    uart_pull_out(uart, *s);
 }
 
 /* Reads message from uart buffer. Returns if data was read. */
