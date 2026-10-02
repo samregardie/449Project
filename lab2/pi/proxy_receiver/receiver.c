@@ -35,9 +35,12 @@
 #define UART_BAUD 115200
 #define MAG_INT16_MIN 32768
 
+#define STATUS_FRAME_LEN 5
+
 void *send_force(void *arg)
 {
   int8_t force = 0;
+  int uart_fd = *(int *)arg;
   int sockfd;
   struct sockaddr_in servaddr;
 
@@ -51,13 +54,35 @@ void *send_force(void *arg)
     exit(EXIT_FAILURE);
   }
 
+  uint8_t frame[16];
+  size_t len = 0;
+
   while (1)
   {
-    usleep(TX_INTERVAL_MS * 1000);
-    printf("Send force %d\n", force);
-    force += 5;
-    sendto(sockfd, (char *)&force, 1, MSG_CONFIRM,
-           (struct sockaddr *)&servaddr, sizeof(servaddr));
+    uint8_t byte;
+    ssize_t n = read(uart_fd, &byte, 1);
+
+    if (n < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      perror("uart read");
+      break;
+    }
+    
+    if (len == sizeof(frame))
+      len = 0; // no terminator found; drop and resync
+    frame[len++] = byte;
+
+    if (byte == 0x7F) {
+      if (len == STATUS_FRAME_LEN) {
+        int8_t force = (int8_t)frame[2];
+        printf("Motor Left: %d, Motor Right: %d, Servo: %d, Status: %b\n", frame[0], frame[1], force, frame[3]);
+        //sendto(sockfd, &force, 1, 0,
+        //       (struct sockaddr *)&servaddr, sizeof(servaddr));
+      }
+      len = 0;
+    }
   }
 }
 
@@ -136,7 +161,7 @@ int main()
   DIJOYSTATE2_t state;
   char recvbuf[sizeof(DIJOYSTATE2_t) + 4];
   pthread_t send_tid;
-  pthread_create(&send_tid, NULL, send_force, NULL);
+  pthread_create(&send_tid, NULL, send_force, &uart_fd);
 
   write(uart_fd, "Test from Pi\n\x7F", 14);
 
