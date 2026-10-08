@@ -23,7 +23,7 @@
 #define LOCAL_HOST "172.26.166.54" // IP of local interface
 #define R_PORT 8000
 
-#define REMOTE_HOST "172.26.34.95"
+#define REMOTE_HOST "172.26.60.74"
 #define S_PORT 8001
 /** **/
 
@@ -33,7 +33,7 @@
 #define TX_INTERVAL_MS 300
 #define STATE_SIZE sizeof(DIJOYSTATE2_t)
 
-#define UART_BAUD 115200
+#define UART_BAUD B115200
 #define MAG_INT16_MIN 32768
 
 #define STATUS_FRAME_LEN 5
@@ -60,8 +60,11 @@ void *send_force(void *arg)
 
   while (1)
   {
+    //printf("receiv loop len:%d\n", len);
     int8_t byte;
     ssize_t n = read(uart_fd, &byte, 1);
+
+    //printf("%d\n", byte);
 
     if (n < 0)
     {
@@ -69,11 +72,14 @@ void *send_force(void *arg)
         continue;
       perror("uart read");
       break;
-    }
+    } else if (n == 0) continue;
     
-    if (len == sizeof(frame))
+    if (len == sizeof(frame)) {
       len = 0; // no terminator found; drop and resync
-    frame[len++] = byte;
+      //printf("no frame found \n");
+    }
+    frame[len] = byte;
+    len++;
 
     if (byte == 0x7F) {
       if (len == STATUS_FRAME_LEN) {
@@ -140,7 +146,7 @@ int main()
   gpioWrite(UDP_RX_GPIO, PI_LOW);
   gpioWrite(CMD_TX_GPIO, PI_LOW);
 
-  int uart_fd = uart_open("/dev/serial0", UART_BAUD);
+  int uart_fd = uart_open("/dev/ttyAMA5", UART_BAUD);
 
   if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
   {
