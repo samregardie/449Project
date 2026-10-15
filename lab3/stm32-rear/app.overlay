@@ -1,0 +1,102 @@
+/*
+ * N3 (rear, drivetrain) pin assignments for the Nucleo-F401RE.
+ *
+ * Still the Lab 2 pins, split out for this node. Before adding the two
+ * MCP2515s (handout Part 1 and Appendix B):
+ * - SPI1 is disabled below and must be enabled for CAN.
+ * - RL (D11) and RR (D10) sit on the SPI1 pins and the suggested CAN A CS.
+ * - Right motor PWM is on D2 (PA10), the suggested CAN A INT; left motor PWM
+ *   is on D4 (PB5), the suggested CAN B INT.
+ * - Encoder pins D6-D9 use EXTI lines 7-10, and the CAN INT pins need EXTI
+ *   lines too. STM32 has one EXTI line per pin number across all ports.
+ * - Common code expects the same node labels on both nodes (CAN, DEG_A/B,
+ *   ERR, blinkers), so pick names that work for front and rear.
+ *
+ * Pitfalls:
+ * - The board file already gives many header pins to SPI/I2C/UART/PWM. The
+ *   build does NOT flag two users of one pin; the last driver to set it
+ *   wins. Before enabling a board peripheral, check its pins against this file.
+ * - GPIOs use Arduino names (D2, A5); PWM pinctrl uses MCU names (PA10).
+ *   Both refer to the same pins.
+ * - The KiCad symbol calls D14/D15 "SDA/A4" and "SCL/A5". On the Nucleo they
+ *   are PB9/PB8, separate from A4/A5 (PC1/PC0).
+ */
+
+/* Board peripherals that claim pins we use */
+&spi1 {		/* D11-D13 */
+	status = "disabled";
+};
+
+&usart1 {	/* D10 */
+	status = "disabled";
+};
+
+&pwm2 {		/* D13 */
+	status = "disabled";
+};
+
+&i2c1 {		/* D14, D15 */
+	status = "disabled";
+};
+
+&i2c3 {		/* D7 */
+	status = "disabled";
+};
+
+/* Right motor PWM: D2 = PA10 (L298N IN1) */
+&timers1 {
+	status = "okay";
+
+	pwm1: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim1_ch3_pa10>;
+		pinctrl-names = "default";
+	};
+};
+
+/* Left motor PWM: D4 = PB5 (L298N IN3) */
+&timers3 {
+	status = "okay";
+
+	pwm3: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim3_ch2_pb5>;
+		pinctrl-names = "default";
+	};
+};
+
+/ {
+	/* pin -> 4.7k -> LED -> GND, so high = on */
+	blinkers {
+		compatible = "gpio-leds";
+
+		blink_rl: blink_rl {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
+		};
+
+		blink_rr: blink_rr {
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D10 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	zephyr,user {
+		/* <A>, <B> */
+		enc-right-gpios = <&arduino_header ARDUINO_HEADER_R3_D6 GPIO_ACTIVE_HIGH>,
+				  <&arduino_header ARDUINO_HEADER_R3_D7 GPIO_ACTIVE_HIGH>;
+		enc-left-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>,
+				 <&arduino_header ARDUINO_HEADER_R3_D9 GPIO_ACTIVE_HIGH>;
+
+		/* L298N IN2, IN4 (ENA/ENB tied high) */
+		motor-right-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D3 GPIO_ACTIVE_HIGH>;
+		motor-left-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D5 GPIO_ACTIVE_HIGH>;
+
+		/* Test points */
+		dir-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
+		pwm-set-gpios = <&arduino_header ARDUINO_HEADER_R3_A4 GPIO_ACTIVE_HIGH>;
+
+		/* Motor period (20 kHz) is a placeholder */
+		pwms = <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
+		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;
+		pwm-names = "motor_right", "motor_left";
+	};
+};
