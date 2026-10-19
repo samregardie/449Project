@@ -18,8 +18,35 @@
  */
 
 /* Board peripherals that claim pins we use */
-&spi1 {		/* D11-D13 */
-	status = "disabled";
+&spi1 {
+    status = "okay";
+    /* Set pins to: SCK PB3, MISO PB4, MOSI PB5 */
+    pinctrl-0 = <&spi1_sck_pb3 &spi1_miso_pb4 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+    
+    /* Entry 0 -> reg <0>, entry 1 -> reg <1> */
+    cs-gpios = <&gpiob 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,  /* D10: CAN A CS */
+           <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D9:  CAN B CS */
+
+    can_a: mcp2515@0 {
+        compatible = "microchip,mcp2515";
+        reg = <0>;                          /* index into cs-gpios */
+        spi-max-frequency = <10000000>;     /* MCP2515 limit; see note on actual clock */
+        int-gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;  /* D6: module D6 INT */
+        osc-freq = <16000000>;
+        bitrate = <500000>;
+        status = "okay";
+    };
+
+    can_b: mcp2515@1 {
+        compatible = "microchip,mcp2515";
+        reg = <1>;
+        spi-max-frequency = <10000000>;
+        int-gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;   /* D7: module D6 INT */
+        osc-freq = <16000000>;
+        bitrate = <500000>;
+        status = "okay";
+    };
 };
 
 &usart1 {	/* D10 */
