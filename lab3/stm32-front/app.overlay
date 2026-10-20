@@ -17,7 +17,21 @@
  * - D13 (PA5) also drives the green LD2.
  */
 
-/* Board peripherals that claim pins we use */
+/ {
+    aliases {
+        can-a = &can_a;
+        can-b = &can_b;
+    };
+
+    chosen {
+        /* Only used by samples like can/counter; your app can
+         * use the aliases above instead. */
+        zephyr,canbus = &can_a;
+    };
+};
+
+
+ /* Board peripherals that claim pins we use */
 &spi1 {
     status = "okay";
     /* Set pins to: SCK PB3, MISO PB4, MOSI PB5 */
