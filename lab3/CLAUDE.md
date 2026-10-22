@@ -144,9 +144,8 @@ The team must explain every design decision and number, so explain and review ra
 
 From the repo root, after `source ./setup449`:
 ```sh
-west build -p always -b nucleo_f401re -d build-front lab3/stm32-front   # N2
-west build -p always -b nucleo_f401re -d build-rear  lab3/stm32-rear    # N3
-west flash -d build-front                                                # flash one board at a time
+west build-front / west flash-front   # N2 (aliases set by setup449; add -p for a clean build)
+west build-rear  / west flash-rear    # N3 (both boards plugged in: add --dev-id <serial>)
 west build -p always -b nucleo_f401re ../zephyr/samples/drivers/can/counter -- -DDTC_OVERLAY_FILE=<overlay>   # Part 0 bring-up
 ```
 Pi bring-up: add `dtparam=spi=on` and the two `mcp2515-can0`/`can1` overlays to `/boot/firmware/config.txt`.

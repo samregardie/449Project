@@ -9,4 +9,10 @@ fi
 
 source "$_setup449_dir/../.venv/bin/activate"
 source "$_setup449_dir/../zephyr/zephyr-env.sh"
-unset _setup449_dir
+
+# Shortcuts (work from any folder): west build-front, west flash-front, same for rear
+for _n in front rear; do
+    west config alias.build-$_n "build -b nucleo_f401re -d '$_setup449_dir/build-$_n' '$_setup449_dir/lab3/stm32-$_n'"
+    west config alias.flash-$_n "flash -d '$_setup449_dir/build-$_n'"
+done
+unset _setup449_dir _n
