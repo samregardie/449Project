@@ -130,6 +130,11 @@
 		dir-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
 		pwm-set-gpios = <&arduino_header ARDUINO_HEADER_R3_A4 GPIO_ACTIVE_HIGH>;
 
+		/* Arduino header is full: morpho CN7 pins 1-3 */
+		deg-a-gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>;
+		deg-b-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>;
+		err-gpios = <&gpioc 12 GPIO_ACTIVE_HIGH>;
+
 		/* Motor period (20 kHz) is a placeholder */
 		pwms = <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
 		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;

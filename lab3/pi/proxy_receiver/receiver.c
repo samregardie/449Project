@@ -128,18 +128,16 @@ static void *tick(void *arg)
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
 
     int64_t now = now_ms();
-    bool bus_ok[2] = { true, true }, failed[2], other_fault = false;
+    // A bus is degraded when we hear no other zone on it
+    bool bus_ok[2] = { false, false }, failed[2], other_fault = false;
 
     pthread_mutex_lock(&lock);
     for (int z = 0; z < 2; z++) {
       bool seen_a = now - last_hb_ms[z][0] <= TIMEOUT_MS;
       bool seen_b = now - last_hb_ms[z][1] <= TIMEOUT_MS;
+      bus_ok[0] |= seen_a;
+      bus_ok[1] |= seen_b;
       failed[z] = !seen_a && !seen_b;
-      // A zone that's gone from both buses is a failed zone, not a bad bus
-      if (!failed[z]) {
-        bus_ok[0] &= seen_a;
-        bus_ok[1] &= seen_b;
-      }
       other_fault |= zone_fault[z];
     }
     bool test = test_fault;

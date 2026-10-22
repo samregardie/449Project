@@ -1,28 +1,35 @@
+#include <errno.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
 #include "canbus.h"
+#include "ctrl.h"
+#include "errorstate.h"
 #include "servo.h"
 
-/* TEMP: CAN layer test. Prints each CTRL once, however many copies arrive */
 static void on_ctrl(const struct can_frame *f)
 {
-	printk("CTRL seq %u\n", f->data[0] & CAN_SEQ_MASK);
+	struct ctrl c;
+	int ret = ctrl_parse(f, &c);
+
+	if (ret == -ERANGE) {
+		errorstate_bad_ctrl();
+	}
+	if (ret != 0) {
+		return;
+	}
+
+	/* First, so the servo has left the error state */
+	errorstate_ctrl_ok();
+	servo_command(c.steer);
 }
 
 int main(void)
 {
-	if (servo_init() != 0) {
+	if (servo_init() != 0 || errorstate_init(servo_set_error) != 0 ||
+	    canbus_on(CAN_ID_CTRL, on_ctrl) != 0 || canbus_init() != 0) {
 		printk("init failed\n");
-		return 1;
-	}
-
-	canbus_on(CAN_ID_CTRL, on_ctrl);
-
-	int ret = canbus_init();
-
-	if (ret != 0) {
-		printk("canbus init failed (%d)\n", ret);
 		return 1;
 	}
 
