@@ -6,7 +6,7 @@ Lab 3: Dual-Redundant CAN and Real-Time Analysis (due 2026-10-22, 11:59pm). The 
 
 ```
 lab3/
-  pi/proxy_receiver/   N1: Lab 2 C receiver (UDP -> UART, pigpio). UART write gets replaced by SocketCAN on canA/canB.
+  pi/proxy_receiver/   N1 cockpit (C, pigpio, SocketCAN on canA/canB). Payload layouts are in the receiver.c header comment.
   stm32-common/        Not an app. .c/.h shared by both STM32 nodes; each node's CMakeLists.txt adds them.
   stm32-front/         N2 steering app (NODE_ID=2): servo
   stm32-rear/          N3 drivetrain app (NODE_ID=3): drive (PI loop), motor, encoder
@@ -161,7 +161,7 @@ sudo reboot
 ```
 If `ip link` shows `can0`/`can1` instead, the rule didn't match. Then:
 ```sh
-sudo ip link set canA up type can bitrate 500000   # same for canB
+sudo ip link set canA up type can bitrate 500000   # same for canB (pi/proxy_receiver/run.sh does this plus build and start)
 ip -details link show canA                          # expect ERROR-ACTIVE
 candump -c -t d any
 ```

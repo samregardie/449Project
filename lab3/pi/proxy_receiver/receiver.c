@@ -1,21 +1,27 @@
-#include <stdint.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <termios.h>
-#include <stdbool.h>
-#include <pigpio.h>
-#include <errno.h>
+/*
+ * N1 cockpit: wheel state over UDP in, CAN out on canA and canB.
+ *
+ * Payloads (byte 0 = seq in the low nibble):
+ *   CTRL   steer int16 LE (-100..100), throttle, brake (0..100), buttons, CRC-8 of bytes 0-5
+ *   HB     own fault (0/1), bus health (bit0 = A ok, bit1 = B ok)
+ *   BLINK  state (off/left/right/hazard), phase (1 = lamps on)
+ *   FAULT  zone, reason
+ *   FORCE  int8
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdatomic.h>
 #include <string.h>
-#include <sys/types.h>
+#include <time.h>
+#include <pthread.h>
+#include <net/if.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
-#include "pthread.h"
-#include <inttypes.h>
+#include <linux/can.h>
+#include <pigpio.h>
 
 #include "state.h"
 
@@ -27,175 +33,282 @@
 #define S_PORT 8001
 /** **/
 
+// GPIOs (BCM numbers)
 #define UDP_RX_GPIO 2
 #define CMD_TX_GPIO 3
+#define DEG_A_GPIO 13
+#define DEG_B_GPIO 19
+#define ERR_GPIO 26
+static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
-#define TX_INTERVAL_MS 300
-#define STATE_SIZE sizeof(DIJOYSTATE2_t)
+#define ID_CTRL 0x010
+#define ID_FAULT 0x020
+#define ID_HB_N1 0x100
+#define ID_HB_N2 0x101
+#define ID_HB_N3 0x102
+#define ID_BLINK 0x200
+#define ID_FORCE 0x300
 
-#define UART_BAUD 115200
-#define MAG_INT16_MIN 32768
+enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
+enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
 
-#define STATUS_FRAME_LEN 5
+#define TICK_MS 20
+#define BLINK_TICKS 25    // toggle every 500 ms = 1 Hz
+#define TIMEOUT_MS 60     // 3 missed heartbeats or UDP updates
+#define DOUBLE_PRESS_MS 500
+#define TURN_THRESHOLD 30 // blinker cancels after steering past this and back
 
-void *send_force(void *arg)
+#define SCALE ((32768 + 99) / 100) // int16 -> -100..100, same as Lab 2
+
+static int can_fd;
+static int ifindex[2];
+
+// Shared between threads, under `lock`. Zone index 0 is N2, 1 is N3.
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static int64_t last_udp_ms;
+static int64_t last_hb_ms[2][2]; // [zone][bus]
+static uint8_t zone_fault[2];
+static bool test_fault;
+static int blink_req; // from the paddles
+
+static atomic_bool inject_bad;
+
+static int64_t now_ms(void)
 {
-  int8_t force = 0;
-  int uart_fd = *(int *)arg;
-  int sockfd;
-  struct sockaddr_in servaddr;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+}
 
-  servaddr.sin_family = AF_INET;
-  servaddr.sin_port = htons(S_PORT);
-  servaddr.sin_addr.s_addr = inet_addr(REMOTE_HOST);
+static void toggle(int gpio)
+{
+  gpioWrite(gpio, !gpioRead(gpio));
+}
 
-  if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
-  {
-    perror("failed to create socket");
-    exit(EXIT_FAILURE);
+static uint8_t crc8(const uint8_t *data, int len) // polynomial 0x07
+{
+  uint8_t crc = 0;
+  for (int i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int b = 0; b < 8; b++)
+      crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : crc << 1;
   }
+  return crc;
+}
 
-  int8_t frame[16];
-  size_t len = 0;
+// Same frame on A, then B. MSG_DONTWAIT so a bus that is down can't block us.
+static void send_both(uint16_t id, const uint8_t data[8])
+{
+  struct can_frame f = { .can_id = id, .can_dlc = 8 };
+  memcpy(f.data, data, 8);
 
-  while (1)
-  {
-    int8_t byte;
-    ssize_t n = read(uart_fd, &byte, 1);
-
-    if (n < 0)
-    {
-      if (errno == EINTR)
-        continue;
-      perror("uart read");
-      break;
-    }
-    
-    if (len == sizeof(frame))
-      len = 0; // no terminator found; drop and resync
-    frame[len++] = byte;
-
-    if (byte == 0x7F) {
-      if (len == STATUS_FRAME_LEN) {
-        int8_t force = (int8_t)frame[2];
-        printf("Motor Left: %d, Motor Right: %d, Servo: %d, Status: %08b\n", frame[0], frame[1], force, frame[3]);
-        //sendto(sockfd, &force, 1, 0,
-        //       (struct sockaddr *)&servaddr, sizeof(servaddr));
-      }
-      len = 0;
-    }
+  for (int b = 0; b < 2; b++) {
+    struct sockaddr_can addr = { .can_family = AF_CAN, .can_ifindex = ifindex[b] };
+    toggle(can_tx_gpio[b]);
+    sendto(can_fd, &f, sizeof(f), MSG_DONTWAIT, (struct sockaddr *)&addr, sizeof(addr));
   }
 }
 
-int uart_open(const char *dev, speed_t baud)
+// Every 20 ms: HB_TX, HB_MON, FAULT, BLINK_TX. Only this thread sends these IDs.
+static void *tick(void *arg)
 {
-  int fd = open(dev, O_RDWR | O_NOCTTY);
-  if (fd < 0)
-  {
-    perror("open");
-    return -1;
+  uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0;
+  int sent_blink = -1, ticks = 0;
+  bool phase = false, was_error = false, was_test = false;
+  bool was_failed[2] = { true, true }; // no FAULT for zones that never started
+  struct timespec next;
+  clock_gettime(CLOCK_MONOTONIC, &next);
+
+  while (1) {
+    next.tv_nsec += TICK_MS * 1000000;
+    if (next.tv_nsec >= 1000000000) {
+      next.tv_nsec -= 1000000000;
+      next.tv_sec++;
+    }
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+
+    int64_t now = now_ms();
+    bool bus_ok[2] = { true, true }, failed[2], other_fault = false;
+
+    pthread_mutex_lock(&lock);
+    for (int z = 0; z < 2; z++) {
+      bool seen_a = now - last_hb_ms[z][0] <= TIMEOUT_MS;
+      bool seen_b = now - last_hb_ms[z][1] <= TIMEOUT_MS;
+      failed[z] = !seen_a && !seen_b;
+      // A zone that's gone from both buses is a failed zone, not a bad bus
+      if (!failed[z]) {
+        bus_ok[0] &= seen_a;
+        bus_ok[1] &= seen_b;
+      }
+      other_fault |= zone_fault[z];
+    }
+    bool test = test_fault;
+    bool error = test || other_fault || failed[0] || failed[1] || now - last_udp_ms > TIMEOUT_MS;
+    int blink = error ? BLINK_HAZARD : blink_req;
+    pthread_mutex_unlock(&lock);
+
+    gpioWrite(DEG_A_GPIO, !bus_ok[0]);
+    gpioWrite(DEG_B_GPIO, !bus_ok[1]);
+    gpioWrite(ERR_GPIO, error);
+    if (error != was_error)
+      printf(error ? "ERROR\n" : "OK\n");
+    was_error = error;
+
+    uint8_t hb[8] = { seq_hb++ & 0x0F, test, bus_ok[0] | bus_ok[1] << 1 };
+    send_both(ID_HB_N1, hb);
+
+    // FAULT once, when a zone is lost or the test button is pressed
+    for (int z = 0; z < 2; z++) {
+      if (failed[z] && !was_failed[z]) {
+        uint8_t f[8] = { seq_fault++ & 0x0F, z + 2, FAULT_HB_LOST };
+        send_both(ID_FAULT, f);
+      }
+      was_failed[z] = failed[z];
+    }
+    if (test && !was_test) {
+      uint8_t f[8] = { seq_fault++ & 0x0F, 1, FAULT_TEST_BUTTON };
+      send_both(ID_FAULT, f);
+    }
+    was_test = test;
+
+    // New state: send now, lamps on. Same state: toggle every 500 ms.
+    bool changed = blink != sent_blink;
+    if (changed || (blink != BLINK_OFF && ++ticks == BLINK_TICKS)) {
+      phase = changed ? blink != BLINK_OFF : !phase;
+      sent_blink = blink;
+      ticks = 0;
+      uint8_t b[8] = { seq_blink++ & 0x0F, blink, phase };
+      send_both(ID_BLINK, b);
+    }
   }
+  return NULL;
+}
 
-  struct termios tty;
-  if (tcgetattr(fd, &tty) != 0)
-  {
-    perror("tcgetattr");
-    close(fd);
-    return -1;
+// Heartbeats from N2/N3, and FORCE forwarded to the proxy
+static void *can_rx(void *arg)
+{
+  int udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+  struct sockaddr_in proxy = { .sin_family = AF_INET, .sin_port = htons(S_PORT) };
+  proxy.sin_addr.s_addr = inet_addr(REMOTE_HOST);
+
+  while (1) {
+    struct can_frame f;
+    struct sockaddr_can addr;
+    socklen_t len = sizeof(addr);
+
+    if (recvfrom(can_fd, &f, sizeof(f), 0, (struct sockaddr *)&addr, &len) != sizeof(f))
+      continue;
+    int bus = addr.can_ifindex == ifindex[0] ? 0 : 1;
+
+    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3) {
+      int z = f.can_id - ID_HB_N2;
+      pthread_mutex_lock(&lock);
+      last_hb_ms[z][bus] = now_ms();
+      zone_fault[z] = f.data[1];
+      pthread_mutex_unlock(&lock);
+    } else if (f.can_id == ID_FORCE) {
+      sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
+    }
   }
+  return NULL;
+}
 
-  cfmakeraw(&tty); // raw mode: no translation of bytes
-  cfsetispeed(&tty, baud);
-  cfsetospeed(&tty, baud);
-
-  tty.c_cflag |= CLOCAL | CREAD; // ignore modem lines, enable receiver
-  tty.c_cflag &= ~CSTOPB;        // 1 stop bit
-  tty.c_cflag &= ~PARENB;        // no parity
-  tty.c_cflag &= ~CRTSCTS;       // no hardware flow control
-
-  tty.c_cc[VMIN] = 0;   // read() returns immediately...
-  tty.c_cc[VTIME] = 10; // ...or after 1 s timeout (tenths of a second)
-
-  if (tcsetattr(fd, TCSANOW, &tty) != 0)
-  {
-    perror("tcsetattr");
-    close(fd);
-    return -1;
-  }
-  return fd;
+// Enter on stdin: the next CTRL is out of range (bad-input test)
+static void *input(void *arg)
+{
+  int c;
+  while ((c = getchar()) != EOF)
+    if (c == '\n')
+      inject_bad = true;
+  return NULL;
 }
 
 int main()
 {
-  int sockfd;
-  char buffer[STATE_SIZE + 1];
+  if (gpioInitialise() < 0)
+    exit(EXIT_FAILURE);
+  const int outputs[] = { UDP_RX_GPIO, CMD_TX_GPIO, DEG_A_GPIO, DEG_B_GPIO, ERR_GPIO,
+                          can_tx_gpio[0], can_tx_gpio[1] };
+  for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++) {
+    gpioSetMode(outputs[i], PI_OUTPUT);
+    gpioWrite(outputs[i], PI_LOW);
+  }
 
-  struct sockaddr_in servaddr = {0};
-
-  // Initialize GPIO
-  gpioInitialise();
-  gpioSetMode(UDP_RX_GPIO, PI_OUTPUT); // Set GPIO2 as input.
-  gpioSetMode(CMD_TX_GPIO, PI_OUTPUT); // Set GPIO3 as input.
-
-  gpioWrite(UDP_RX_GPIO, PI_LOW);
-  gpioWrite(CMD_TX_GPIO, PI_LOW);
-
-  int uart_fd = uart_open("/dev/serial0", UART_BAUD);
-
-  if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
-  {
-    perror("failed to create socket");
+  // ifindex 0 receives from both interfaces; recvfrom says which one
+  struct sockaddr_can can_addr = { .can_family = AF_CAN, .can_ifindex = 0 };
+  can_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+  ifindex[0] = if_nametoindex("canA");
+  ifindex[1] = if_nametoindex("canB");
+  if (!ifindex[0] || !ifindex[1] ||
+      bind(can_fd, (struct sockaddr *)&can_addr, sizeof(can_addr)) < 0) {
+    perror("can");
     exit(EXIT_FAILURE);
   }
 
-  servaddr.sin_family = AF_INET;
-  servaddr.sin_port = htons(R_PORT);
+  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  struct sockaddr_in servaddr = { .sin_family = AF_INET, .sin_port = htons(R_PORT) };
   servaddr.sin_addr.s_addr = inet_addr(LOCAL_HOST);
-
-  if (bind(sockfd, (const struct sockaddr *)&servaddr,
-           sizeof(servaddr)) < 0)
-  {
-    perror("bind failed");
+  if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+    perror("udp");
     exit(EXIT_FAILURE);
   }
 
+  pthread_t tid;
+  pthread_create(&tid, NULL, tick, NULL);
+  pthread_create(&tid, NULL, can_rx, NULL);
+  pthread_create(&tid, NULL, input, NULL);
+
+  char buf[4 + sizeof(DIJOYSTATE2_t)]; // 4-byte packet counter, then the state
   DIJOYSTATE2_t state;
-  char recvbuf[sizeof(DIJOYSTATE2_t) + 4];
-  pthread_t send_tid;
-  pthread_create(&send_tid, NULL, send_force, &uart_fd);
+  uint8_t seq_ctrl = 0;
+  bool prev_left = false, prev_right = false, prev_test = false, turned = false;
+  int64_t last_test_press = 0;
 
-  write(uart_fd, "Test from Pi\n\x7F", 14);
+  while (1) {
+    if (recv(sockfd, buf, sizeof(buf), 0) <= 4)
+      continue;
+    toggle(UDP_RX_GPIO);
+    memcpy(&state, buf + 4, sizeof(state));
 
-  while (1)
-  {
-    // printf("Wait recv\n");
-    int n, len;
-    n = recvfrom(sockfd, recvbuf, STATE_SIZE, MSG_WAITALL,
-                 (struct sockaddr *)&servaddr, &len);
-    gpioWrite(UDP_RX_GPIO, !gpioRead(UDP_RX_GPIO)); // Toggle the gpio when read complete
-    uint32_t packet_ct = ((uint32_t *)recvbuf)[0];
-    memcpy(&state, recvbuf + 4, sizeof(state));
-    // printf("Receive state (Pkt: %8X) :  Wheel: %d | Throttle: %d | Brake: %d\n", packet_ct, state.lX, state.lY, state.lRz);
+    int8_t steer = state.lX / SCALE;
+    int8_t throttle = state.lY / SCALE;
+    int8_t brake = state.lRz / SCALE;
+    bool left = state.rgbButtons[5], right = state.rgbButtons[4], test = state.rgbButtons[1];
+    int64_t now = now_ms();
 
-    // Data scaling for stm32
-    int8_t steer = state.lX / ((MAG_INT16_MIN + 99) / 100);    // Denominator is division by 100 but always round up
-    int8_t throttle = state.lY / ((MAG_INT16_MIN + 99) / 100); // Denominator is division by 100 but always round up
-    int8_t brake = state.lRz / ((MAG_INT16_MIN + 99) / 100);   // Denominator is division by 100 but always round up
-    bool left_signal = state.rgbButtons[5];
-    bool right_signal = state.rgbButtons[4];
-    bool error_button = state.rgbButtons[1];
+    pthread_mutex_lock(&lock);
+    last_udp_ms = now;
 
-    // throttle = (2*throttle) - 100;	// shift from 0 to 100 to -100 to 100
-    // brake = (2*brake) - 100;		// shift from 0 to 100 to -100 to 100
+    // Single press enters error, a second press within 500 ms exits
+    if (test && !prev_test) {
+      bool double_press = test_fault && now - last_test_press <= DOUBLE_PRESS_MS;
+      test_fault = !double_press;
+      last_test_press = now;
+    }
 
-    //printf("steer=%d, throttle=%d, brake=%d, left=%d, right=%d, error=%d \n", steer, throttle, brake, left_signal, right_signal, error_button);
+    // A paddle starts that side's blinker, or cancels one that is on
+    if ((left && !prev_left) || (right && !prev_right)) {
+      blink_req = blink_req != BLINK_OFF ? BLINK_OFF : left ? BLINK_LEFT : BLINK_RIGHT;
+      turned = false;
+    }
 
-    // Send data over uart
-    uint8_t buf[] = {steer, throttle, brake, left_signal, right_signal, error_button, '\n', 0x7F};
-    write(uart_fd, buf, sizeof(buf));
-    gpioWrite(CMD_TX_GPIO, !gpioRead(CMD_TX_GPIO)); // Toggle the gpio on write
-    //printf("%s\n", buf);
+    // Self-cancel once the wheel has turned that way and come back
+    if ((blink_req == BLINK_LEFT && steer < -TURN_THRESHOLD) ||
+        (blink_req == BLINK_RIGHT && steer > TURN_THRESHOLD))
+      turned = true;
+    if (turned && abs(steer) < TURN_THRESHOLD)
+      blink_req = BLINK_OFF;
+    pthread_mutex_unlock(&lock);
+
+    prev_left = left;
+    prev_right = right;
+    prev_test = test;
+
+    int16_t s = atomic_exchange(&inject_bad, false) ? 1000 : steer;
+    uint8_t d[8] = { seq_ctrl++ & 0x0F, s & 0xFF, (uint16_t)s >> 8, throttle, brake,
+                     left | right << 1 | test << 2 };
+    d[6] = crc8(d, 6);
+    send_both(ID_CTRL, d);
+    toggle(CMD_TX_GPIO);
   }
-
-  return 0;
 }
