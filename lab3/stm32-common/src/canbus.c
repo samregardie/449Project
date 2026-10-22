@@ -29,25 +29,18 @@ static const struct device *const can[BUS_COUNT] = {
 	DEVICE_DT_GET(DT_ALIAS(can_b)),
 };
 
-/* Test points, skipped until the overlay defines them */
+/* Test points */
 #define USER_NODE DT_PATH(zephyr_user)
 
 static const struct gpio_dt_spec tp_tx[BUS_COUNT] = {
-	GPIO_DT_SPEC_GET_OR(USER_NODE, can_tx_a_gpios, {0}),
-	GPIO_DT_SPEC_GET_OR(USER_NODE, can_tx_b_gpios, {0}),
+	GPIO_DT_SPEC_GET(USER_NODE, can_tx_a_gpios),
+	GPIO_DT_SPEC_GET(USER_NODE, can_tx_b_gpios),
 };
 
 static const struct gpio_dt_spec tp_rx[BUS_COUNT] = {
-	GPIO_DT_SPEC_GET_OR(USER_NODE, can_rx_a_gpios, {0}),
-	GPIO_DT_SPEC_GET_OR(USER_NODE, can_rx_b_gpios, {0}),
+	GPIO_DT_SPEC_GET(USER_NODE, can_rx_a_gpios),
+	GPIO_DT_SPEC_GET(USER_NODE, can_rx_b_gpios),
 };
-
-static void toggle(const struct gpio_dt_spec *tp)
-{
-	if (tp->port != NULL) {
-		gpio_pin_toggle_dt(tp);
-	}
-}
 
 struct handler {
 	uint16_t id;
@@ -109,7 +102,7 @@ static void dispatch(void *p1, void *p2, void *p3)
 
 	while (1) {
 		k_msgq_get(&rx_queue, &msg, K_FOREVER);
-		toggle(&tp_rx[msg.bus]);
+		gpio_pin_toggle_dt(&tp_rx[msg.bus]);
 
 		const struct can_frame *f = &msg.frame;
 		struct handler *h = find_handler(f->id);
@@ -150,11 +143,9 @@ uint32_t canbus_ms_since(uint16_t id, enum canbus_bus bus)
 int canbus_init(void)
 {
 	for (int b = 0; b < BUS_COUNT; b++) {
-		if (tp_tx[b].port != NULL) {
-			gpio_pin_configure_dt(&tp_tx[b], GPIO_OUTPUT_INACTIVE);
-		}
-		if (tp_rx[b].port != NULL) {
-			gpio_pin_configure_dt(&tp_rx[b], GPIO_OUTPUT_INACTIVE);
+		if (gpio_pin_configure_dt(&tp_tx[b], GPIO_OUTPUT_INACTIVE) != 0 ||
+		    gpio_pin_configure_dt(&tp_rx[b], GPIO_OUTPUT_INACTIVE) != 0) {
+			return -EIO;
 		}
 
 		if (!device_is_ready(can[b])) {
@@ -214,7 +205,7 @@ static void tx_done(const struct device *dev, int error, void *user_data)
  */
 static int send_on(int b, const struct can_frame *f)
 {
-	toggle(&tp_tx[b]);
+	gpio_pin_toggle_dt(&tp_tx[b]);
 
 	int ret = can_send(can[b], f, K_NO_WAIT, tx_done, NULL);
 

@@ -15,7 +15,7 @@
  *   Both refer to the same pins.
  * - STM32 has one EXTI line per pin number across all ports, so interrupt
  *   pins must all have different numbers. In use: CAN INT 10 and 8,
- *   encoders 9, 0, 1, 4.
+ *   encoders 9, 0, 1, 4, test button 13.
  * - The KiCad symbol calls D14/D15 "SDA/A4" and "SCL/A5". On the Nucleo they
  *   are PB9/PB8, separate from A4/A5 (PC1/PC0).
  */
@@ -135,9 +135,19 @@
 		deg-b-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>;
 		err-gpios = <&gpioc 12 GPIO_ACTIVE_HIGH>;
 
+		/* Morpho CN10 pins 1, 2, 4, 6 */
+		can-rx-a-gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>;
+		can-rx-b-gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>;
+		can-tx-a-gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>;
+		can-tx-b-gpios = <&gpioc 5 GPIO_ACTIVE_HIGH>;
+
 		/* Motor period (20 kHz) is a placeholder */
 		pwms = <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
 		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;
 		pwm-names = "motor_right", "motor_left";
 	};
+};
+
+&iwdg {
+	status = "okay";
 };

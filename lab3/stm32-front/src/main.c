@@ -9,6 +9,8 @@
 #include "errorstate.h"
 #include "servo.h"
 
+#define FORCE_PERIOD_MS 50
+
 static void on_ctrl(const struct can_frame *f)
 {
 	struct ctrl c;
@@ -35,5 +37,18 @@ int main(void)
 		return 1;
 	}
 
-	return 0;
+	/* FORCE_TX: a dummy counter every 50 ms, at main's priority (the lowest) */
+	struct k_timer timer;
+	uint8_t force = 0;
+
+	k_timer_init(&timer, NULL, NULL);
+	k_timer_start(&timer, K_MSEC(FORCE_PERIOD_MS), K_MSEC(FORCE_PERIOD_MS));
+
+	while (1) {
+		k_timer_status_sync(&timer);
+
+		uint8_t data[8] = { 0, force++ };
+
+		canbus_send(CAN_ID_FORCE, data);
+	}
 }

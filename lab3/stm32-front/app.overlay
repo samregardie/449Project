@@ -1,12 +1,8 @@
 /*
  * N2 (front, steering) pin assignments for the Nucleo-F401RE.
- *
- * Still the Lab 2 pins, split out for this node. Before adding the two
- * MCP2515s (handout Part 1 and Appendix B):
- * - SPI1 is disabled below and must be enabled for CAN.
- * - FR (D12) sits on the SPI1 pins (D11-D13), so it has to move.
- * - Common code expects the same node labels on both nodes (CAN, DEG_A/B,
- *   ERR, blinkers), so pick names that work for front and rear.
+ * The CAN wiring is the same on both nodes; stm32-can-test uses this file.
+ * Common code needs the same labels on both nodes (CAN, DEG_A/B, ERR,
+ * blinkers, CAN test points).
  *
  * Pitfalls:
  * - The board file already gives many header pins to SPI/I2C/UART/PWM. The
@@ -15,6 +11,8 @@
  * - GPIOs use Arduino names (D2, A5); PWM pinctrl uses MCU names (PA10).
  *   Both refer to the same pins.
  * - D13 (PA5) also drives the green LD2.
+ * - Interrupt pins need different pin numbers (one EXTI line per number).
+ *   In use: CAN INT 10 and 8, test button 13.
  */
 
 / {
@@ -24,14 +22,11 @@
     };
 
     chosen {
-        /* Only used by samples like can/counter; your app can
-         * use the aliases above instead. */
-        zephyr,canbus = &can_a;
+        zephyr,canbus = &can_a;	/* only for samples like can/counter */
     };
 };
 
-
- /* Board peripherals that claim pins we use */
+/* Board peripherals that claim pins we use */
 &spi1 {
     status = "okay";
     /* Set pins to: SCK PB3, MISO PB4, MOSI PB5 */
@@ -112,5 +107,13 @@
 		deg-a-gpios = <&arduino_header ARDUINO_HEADER_R3_A1 GPIO_ACTIVE_HIGH>;
 		deg-b-gpios = <&arduino_header ARDUINO_HEADER_R3_A2 GPIO_ACTIVE_HIGH>;
 		err-gpios = <&arduino_header ARDUINO_HEADER_R3_A3 GPIO_ACTIVE_HIGH>;
+		can-rx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D2 GPIO_ACTIVE_HIGH>;
+		can-rx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>;
+		can-tx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
+		can-tx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&iwdg {
+	status = "okay";
 };

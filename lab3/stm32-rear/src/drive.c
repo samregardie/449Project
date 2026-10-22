@@ -3,14 +3,10 @@
  * encoders, brake beats throttle.
  *
  * drive_command() and drive_set_error() only store the request. The control
- * thread is the only code that writes to the motors: every 1 ms it samples
- * the encoders, reads the request and either brakes or runs the PI. The 1 ms
- * period keeps command -> PWM_SET under the 2 ms limit.
- *
- * PWM_SET toggles only on the tick that first applies a new command, so
- * CMD_RX -> PWM_SET on the scope is the software response time, for both
- * throttle and brake. (DIR_A has no edge when braking from forward: forward
- * and brake both hold DIR low.)
+ * thread, every 1 ms, is the only code that writes to the motors. PWM_SET
+ * toggles on the tick that first applies a new command, so CAN_RX -> PWM_SET
+ * on the scope is the node's response time. (DIR_A has no edge when braking
+ * from forward: both hold DIR low.)
  */
 
 #include <stdlib.h>
@@ -41,7 +37,6 @@ static int32_t throttle;
 static bool brake;
 static bool error = true;	/* power-up is the error state */
 static uint32_t seq;		/* bumped on every accepted command */
-static struct drive_status status;
 
 /* Only touched by the control thread */
 static float integral;
@@ -93,16 +88,14 @@ static void control_loop(void *p1, void *p2, void *p3)
 
 		k_spin_unlock(&lock, key);
 
-		float velocity = (encoder_velocity(SIDE_LEFT) + encoder_velocity(SIDE_RIGHT)) / 2.0f;
-		float target = 0.0f;
-		int32_t duty = 0;
-
 		if (stop) {
 			motor_brake();
 			integral = 0.0f;	/* so releasing the brake doesn't lurch */
 		} else {
-			target = throttle_to_target(t);
-			duty = pi_update(target, velocity);
+			float velocity = (encoder_velocity(SIDE_LEFT) +
+					  encoder_velocity(SIDE_RIGHT)) / 2.0f;
+			int32_t duty = pi_update(throttle_to_target(t), velocity);
+
 			motor_set(SIDE_LEFT, duty);
 			motor_set(SIDE_RIGHT, duty);
 		}
@@ -112,10 +105,6 @@ static void control_loop(void *p1, void *p2, void *p3)
 			gpio_pin_toggle_dt(&tp_pwm_set);
 			applied_seq = s;
 		}
-
-		key = k_spin_lock(&lock);
-		status = (struct drive_status){ target, velocity, duty };
-		k_spin_unlock(&lock, key);
 	}
 }
 
@@ -174,13 +163,4 @@ void drive_set_error(bool new_error)
 	seq++;
 
 	k_spin_unlock(&lock, key);
-}
-
-struct drive_status drive_get_status(void)
-{
-	k_spinlock_key_t key = k_spin_lock(&lock);
-	struct drive_status s = status;
-
-	k_spin_unlock(&lock, key);
-	return s;
 }

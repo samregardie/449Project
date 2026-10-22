@@ -1,10 +1,11 @@
 /*
- * The HB thread runs every 20 ms: DEG LEDs, error state, HB_TX, FAULT.
+ * HB thread, every 20 ms: DEG LEDs, error state, HB_TX, FAULT, watchdog feed.
  * CTRL and the test button also update the error state right away.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/watchdog.h>
 #include <zephyr/sys/atomic.h>
 
 #include "canbus.h"
@@ -13,6 +14,9 @@
 #define HB_PERIOD_MS 20
 #define DEBOUNCE_MS 50
 #define DOUBLE_PRESS_MS 500
+
+/* Fed every 20 ms; margin because the IWDG's LSI clock is imprecise */
+#define WDT_TIMEOUT_MS 100
 
 /* TODO (team): justify in the RTA */
 #define HB_PRIO K_PRIO_PREEMPT(3)
@@ -38,6 +42,9 @@ static const struct gpio_dt_spec err_pin = GPIO_DT_SPEC_GET(USER_NODE, err_gpios
 /* Test button: the Nucleo's blue user button B1 (PC13) */
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
 static struct gpio_callback button_cb;
+
+static const struct device *const wdt = DEVICE_DT_GET(DT_NODELABEL(iwdg));
+static int wdt_channel;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
@@ -114,6 +121,8 @@ static void hb_loop(void *p1, void *p2, void *p3)
 
 			canbus_send(CAN_ID_FAULT, fault);
 		}
+
+		wdt_feed(wdt, wdt_channel);
 	}
 }
 
@@ -163,6 +172,13 @@ int errorstate_init(errorstate_cb_t cb)
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&err_pin, GPIO_OUTPUT_ACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&button, GPIO_INPUT) != 0) {
+		return -EIO;
+	}
+
+	struct wdt_timeout_cfg wdt_cfg = { .window.max = WDT_TIMEOUT_MS, .flags = WDT_FLAG_RESET_SOC };
+
+	wdt_channel = wdt_install_timeout(wdt, &wdt_cfg);
+	if (wdt_channel < 0 || wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG) != 0) {
 		return -EIO;
 	}
 
