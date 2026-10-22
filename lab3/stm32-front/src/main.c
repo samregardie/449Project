@@ -7,6 +7,7 @@
 #include "canbus.h"
 #include "ctrl.h"
 #include "errorstate.h"
+#include "relay.h"
 #include "servo.h"
 
 #define FORCE_PERIOD_MS 50
@@ -31,7 +32,7 @@ static void on_ctrl(const struct can_frame *f)
 int main(void)
 {
 	if (servo_init() != 0 || errorstate_init(servo_set_error) != 0 ||
-	    blinker_init() != 0 ||
+	    blinker_init() != 0 || relay_init() != 0 ||
 	    canbus_on(CAN_ID_CTRL, on_ctrl) != 0 || canbus_init() != 0) {
 		printk("init failed\n");
 		return 1;

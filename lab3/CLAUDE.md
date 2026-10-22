@@ -14,7 +14,7 @@ lab3/
   Schematic/           Lab 2 KiCad project, base for the dual-bus schematic
   pins.md              Every pin assignment (old and new) for all three nodes; keep in sync with the overlays
 ```
-Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). `blinker` follows BLINK; the test button is B1 (PC13), handled in `errorstate`. `errorstate` also feeds the IWDG (100 ms). FORCE_TX runs in the front main(). Not done yet: RELAY (and its RELAY_TX pin; A4/A5 are free on the front).
+Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). `blinker` follows BLINK; the test button is B1 (PC13), handled in `errorstate`. `errorstate` also feeds the IWDG (100 ms). FORCE_TX runs in the front main(). RELAY is in `stm32-front/src/relay.c` (RELAY_TX on A4), fed by a `canbus` tap after dedup; it forwards only when N1's and N3's heartbeat bus bits show they share no bus.
 - Common code must not reference node-only hardware or modules. Both overlays need the same node labels for shared hardware (CAN, DEG_A/B, ERR, blinkers). Node differences go through `NODE_ID` or init arguments from each `main.c`.
 - Both `app.overlay` files use the same CAN wiring, which differs from the handout's suggested wiring: SPI1 on D3 (SCK), D5 (MISO) and D4 (MOSI); CS A = D10, B = D9; INT A = D6, B = D7. The rear's Lab 2 pins that collided with it were moved (see its header comment).
 

@@ -7,6 +7,6 @@ target_compile_definitions(app PRIVATE NODE_ID=2)
 
 set(COMMON ${CMAKE_CURRENT_SOURCE_DIR}/../stm32-common)
 
-target_sources(app PRIVATE src/main.c src/servo.c ${COMMON}/src/canbus.c
+target_sources(app PRIVATE src/main.c src/servo.c src/relay.c ${COMMON}/src/canbus.c
 	${COMMON}/src/ctrl.c ${COMMON}/src/errorstate.c ${COMMON}/src/blinker.c)
 target_include_directories(app PRIVATE include ${COMMON}/include)

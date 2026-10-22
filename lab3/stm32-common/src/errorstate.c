@@ -48,6 +48,7 @@ static int wdt_channel;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
+static atomic_t zone_buses[4];		/* same, bus health bits */
 static atomic_t last_ctrl_ms;		/* 0 = never */
 static atomic_t last_press_ms;
 static atomic_t pending_fault;		/* reason for the HB thread to send, 0 = none */
@@ -130,7 +131,10 @@ K_THREAD_DEFINE(hb_thread, 1024, hb_loop, NULL, NULL, NULL, HB_PRIO, 0, SYS_FORE
 
 static void on_hb(const struct can_frame *f)
 {
-	atomic_set(&zone_fault[f->id - CAN_ID_HB_N1 + 1], f->data[1]);
+	int zone = f->id - CAN_ID_HB_N1 + 1;
+
+	atomic_set(&zone_fault[zone], f->data[1]);
+	atomic_set(&zone_buses[zone], f->data[2]);
 }
 
 /* One press enters, a second within 500 ms exits */
@@ -210,4 +214,13 @@ void errorstate_bad_ctrl(void)
 	atomic_or(&own_faults, OWN_BAD_CTRL);
 	atomic_set(&pending_fault, FAULT_BAD_CTRL);
 	update();
+}
+
+uint8_t errorstate_buses(int zone)
+{
+	if (!heard(zone, BUS_A) && !heard(zone, BUS_B)) {
+		return 0;
+	}
+
+	return atomic_get(&zone_buses[zone]);
 }

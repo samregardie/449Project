@@ -53,6 +53,7 @@ struct handler {
 
 static struct handler handlers[MAX_HANDLERS];
 static int n_handlers;
+static canbus_tap_t tap;
 
 static struct handler *find_handler(uint16_t id)
 {
@@ -115,6 +116,9 @@ static void dispatch(void *p1, void *p2, void *p3)
 		atomic_set(&h->last_seen[msg.bus], now);
 
 		if (is_new(h, f->data[0] & CAN_SEQ_MASK, now)) {
+			if (tap != NULL) {
+				tap(f, msg.bus);
+			}
 			h->fn(f);
 		}
 	}
@@ -130,6 +134,11 @@ int canbus_on(uint16_t id, canbus_handler_t handler)
 
 	handlers[n_handlers++] = (struct handler){ .id = id, .fn = handler };
 	return 0;
+}
+
+void canbus_tap(canbus_tap_t fn)
+{
+	tap = fn;
 }
 
 uint32_t canbus_ms_since(uint16_t id, enum canbus_bus bus)
@@ -233,4 +242,14 @@ int canbus_send(uint16_t id, const uint8_t data[8])
 
 	k_mutex_unlock(&tx_lock);
 	return err_a ? err_a : err_b;
+}
+
+int canbus_forward(enum canbus_bus bus, const struct can_frame *f)
+{
+	k_mutex_lock(&tx_lock, K_FOREVER);
+
+	int ret = send_on(bus, f);
+
+	k_mutex_unlock(&tx_lock);
+	return ret;
 }

@@ -33,10 +33,11 @@ Modules are 3.3 V only.
 | CAN_RX_B | - | D8 / PA9 |
 | CAN_TX_A | - | D11 / PA7 |
 | CAN_TX_B | - | D15 / PB8 |
+| RELAY_TX | - | A4 / PC1 |
 | Test button | - | B1 / PC13 (blue button) |
 | CAN modules | - (SPI1 disabled) | see above |
 
-Free: A4 / PC1 and A5 / PC0 (planned for RELAY_TX). D13 / PA5 is free but drives LD2.
+Free: A5 / PC0. D13 / PA5 is free but drives LD2.
 
 EXTI lines in use: CAN 10, 8; button 13.
 
@@ -103,7 +104,7 @@ The CAN pins must match `/boot/firmware/config.txt` (`interrupt=`). The udev rul
 | 9 | - | SRV A0 | PWM_SET A4 |
 | 10 | - | FL D14 | PWM_OUT D2 |
 | 11 | - | FR D12 | DIR_A D15 |
-| 12 | - | RELAY_TX (TBD, A4 or A5) | RL D14 |
+| 12 | - | RELAY_TX A4 | RL D14 |
 | 13 | - | ERR A3 | RR D12 |
 
 The Pi's ERR (GPIO26) and N3's ERR (PC12) aren't in the handout's table, but wire them to LEDs: checkoff step 9 expects ERR high on all three.
