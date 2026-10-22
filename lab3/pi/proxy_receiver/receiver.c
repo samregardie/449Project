@@ -16,6 +16,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
 #include <net/if.h>
@@ -80,6 +81,8 @@ static atomic_bool quit;
 
 static void on_signal(int sig)
 {
+  if (quit)
+    _exit(1); // second Ctrl+C: give up on the clean shutdown
   quit = true;
 }
 
@@ -231,10 +234,12 @@ static void *can_rx(void *arg)
 }
 
 // Enter on stdin: the next CTRL is out of range (bad-input test)
+// read(), not getchar(): getchar() locks stdin while it waits, and
+// gpioTerminate()'s fflush(NULL) would then wait forever for that lock
 static void *input(void *arg)
 {
-  int c;
-  while ((c = getchar()) != EOF)
+  char c;
+  while (read(STDIN_FILENO, &c, 1) == 1)
     if (c == '\n')
       inject_bad = true;
   return NULL;
