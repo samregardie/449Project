@@ -16,7 +16,7 @@ lab3/
 Both apps build, but no Lab 3 code exists yet. They're the Lab 2 actuator code with the UART link and current sensors removed.
 - `stm32-common/` holds Lab 2 `blinker` and `errorstate`. Neither is compiled yet: both still use Lab 2 assumptions (all four blinker LEDs on one node, a self-timed blinker, a UART link timer, direct calls into `drive`/`servo`). Add each to both `CMakeLists.txt` once it's ported.
 - Common code must not reference node-only hardware or modules. Both overlays need the same node labels for shared hardware (CAN, DEG_A/B, ERR, blinkers). Node differences go through `NODE_ID` or init arguments from each `main.c`.
-- The `app.overlay` files still use the Lab 2 pins. Their header comments list the pins that collide with the handout's suggested CAN wiring (SPI1 is disabled, and blinkers/motor PWM sit on SPI1/CS/INT pins).
+- Both `app.overlay` files use the same CAN wiring, which differs from the handout's suggested wiring: SPI1 on D3 (SCK), D5 (MISO) and D4 (MOSI); CS A = D10, B = D9; INT A = D6, B = D7. The rear's Lab 2 pins that collided with it were moved (see its header comment).
 
 ## System
 

@@ -1,32 +1,64 @@
 /*
  * N3 (rear, drivetrain) pin assignments for the Nucleo-F401RE.
  *
- * Still the Lab 2 pins, split out for this node. Before adding the two
- * MCP2515s (handout Part 1 and Appendix B):
- * - SPI1 is disabled below and must be enabled for CAN.
- * - RL (D11) and RR (D10) sit on the SPI1 pins and the suggested CAN A CS.
- * - Right motor PWM is on D2 (PA10), the suggested CAN A INT; left motor PWM
- *   is on D4 (PB5), the suggested CAN B INT.
- * - Encoder pins D6-D9 use EXTI lines 7-10, and the CAN INT pins need EXTI
- *   lines too. STM32 has one EXTI line per pin number across all ports.
- * - Common code expects the same node labels on both nodes (CAN, DEG_A/B,
- *   ERR, blinkers), so pick names that work for front and rear.
+ * The CAN wiring is the same as the front node (stm32-front/app.overlay), so
+ * both boards are wired the same way and stm32-can-test runs on either.
+ * Lab 2 pins that sat on CAN pins were moved:
+ *   left motor PWM D4 -> D11, motor dirs D3/D5 -> A3/A5, RL D11 -> D12,
+ *   RR D10 -> D14, encoders D6/D7/D9 -> A0/A1/A2 (left A stays on D8).
  *
  * Pitfalls:
- * - The board file already gives many header pins to SPI/I2C/UART/PWM. The
- *   build does NOT flag two users of one pin; the last driver to set it
+ * - The board file already gives many header pins to SPI/I2C/UART/PWM/ADC.
+ *   The build does NOT flag two users of one pin; the last driver to set it
  *   wins. Before enabling a board peripheral, check its pins against this file.
  * - GPIOs use Arduino names (D2, A5); PWM pinctrl uses MCU names (PA10).
  *   Both refer to the same pins.
+ * - STM32 has one EXTI line per pin number across all ports, so interrupt
+ *   pins must all have different numbers. In use: CAN INT 10 and 8,
+ *   encoders 9, 0, 1, 4.
  * - The KiCad symbol calls D14/D15 "SDA/A4" and "SCL/A5". On the Nucleo they
  *   are PB9/PB8, separate from A4/A5 (PC1/PC0).
  */
 
-/* Board peripherals that claim pins we use */
-&spi1 {		/* D11-D13 */
-	status = "disabled";
+/ {
+	aliases {
+		can-a = &can_a;
+		can-b = &can_b;
+	};
 };
 
+/* Both MCP2515s on SPI1, moved to D3-D5 to free D11-D13 */
+&spi1 {
+	status = "okay";
+	pinctrl-0 = <&spi1_sck_pb3 &spi1_miso_pb4 &spi1_mosi_pb5>;	/* D3, D5, D4 */
+	pinctrl-names = "default";
+
+	/* Entry 0 -> reg <0>, entry 1 -> reg <1> */
+	cs-gpios = <&gpiob 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,	/* D10: CAN A CS */
+		   <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;	/* D9:  CAN B CS */
+
+	can_a: mcp2515@0 {
+		compatible = "microchip,mcp2515";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		int-gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;	/* D6 */
+		osc-freq = <16000000>;
+		bitrate = <500000>;
+		status = "okay";
+	};
+
+	can_b: mcp2515@1 {
+		compatible = "microchip,mcp2515";
+		reg = <1>;
+		spi-max-frequency = <10000000>;
+		int-gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;		/* D7 */
+		osc-freq = <16000000>;
+		bitrate = <500000>;
+		status = "okay";
+	};
+};
+
+/* Board peripherals that claim pins we use */
 &usart1 {	/* D10 */
 	status = "disabled";
 };
@@ -43,6 +75,10 @@
 	status = "disabled";
 };
 
+&adc1 {		/* A0 */
+	status = "disabled";
+};
+
 /* Right motor PWM: D2 = PA10 (L298N IN1) */
 &timers1 {
 	status = "okay";
@@ -54,13 +90,13 @@
 	};
 };
 
-/* Left motor PWM: D4 = PB5 (L298N IN3) */
+/* Left motor PWM: D11 = PA7 (L298N IN3), same timer channel as before */
 &timers3 {
 	status = "okay";
 
 	pwm3: pwm {
 		status = "okay";
-		pinctrl-0 = <&tim3_ch2_pb5>;
+		pinctrl-0 = <&tim3_ch2_pa7>;
 		pinctrl-names = "default";
 	};
 };
@@ -71,24 +107,24 @@
 		compatible = "gpio-leds";
 
 		blink_rl: blink_rl {
-			gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
 		};
 
 		blink_rr: blink_rr {
-			gpios = <&arduino_header ARDUINO_HEADER_R3_D10 GPIO_ACTIVE_HIGH>;
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
 		};
 	};
 
 	zephyr,user {
 		/* <A>, <B> */
-		enc-right-gpios = <&arduino_header ARDUINO_HEADER_R3_D6 GPIO_ACTIVE_HIGH>,
-				  <&arduino_header ARDUINO_HEADER_R3_D7 GPIO_ACTIVE_HIGH>;
+		enc-right-gpios = <&arduino_header ARDUINO_HEADER_R3_A1 GPIO_ACTIVE_HIGH>,
+				  <&arduino_header ARDUINO_HEADER_R3_A2 GPIO_ACTIVE_HIGH>;
 		enc-left-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>,
-				 <&arduino_header ARDUINO_HEADER_R3_D9 GPIO_ACTIVE_HIGH>;
+				 <&arduino_header ARDUINO_HEADER_R3_A0 GPIO_ACTIVE_HIGH>;
 
 		/* L298N IN2, IN4 (ENA/ENB tied high) */
-		motor-right-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D3 GPIO_ACTIVE_HIGH>;
-		motor-left-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_D5 GPIO_ACTIVE_HIGH>;
+		motor-right-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_A3 GPIO_ACTIVE_HIGH>;
+		motor-left-dir-gpios = <&arduino_header ARDUINO_HEADER_R3_A5 GPIO_ACTIVE_HIGH>;
 
 		/* Test points */
 		dir-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
