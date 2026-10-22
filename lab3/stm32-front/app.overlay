@@ -91,11 +91,11 @@
 		compatible = "gpio-leds";
 
 		blink_left: blink_fl {
-			gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
 		};
 
 		blink_right: blink_fr {
-			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
+			gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
 		};
 	};
 
@@ -111,6 +111,7 @@
 		can-rx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>;
 		can-tx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
 		can-tx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
+		relay-tx-gpios = <&arduino_header ARDUINO_HEADER_R3_A4 GPIO_ACTIVE_HIGH>;
 	};
 };
 

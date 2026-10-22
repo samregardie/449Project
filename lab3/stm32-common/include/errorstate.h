@@ -2,6 +2,7 @@
 #define ERRORSTATE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /*
  * Error state, HB_TX, HB_MON and the test button (B1). In error while any
@@ -24,5 +25,8 @@ void errorstate_ctrl_ok(void);
 
 /* Out-of-range CTRL: own fault, sends FAULT */
 void errorstate_bad_ctrl(void);
+
+/* Buses `zone` says it hears (BIT(BUS_A), BIT(BUS_B)), from its last HB. 0 if that HB is stale */
+uint8_t errorstate_buses(int zone);
 
 #endif
