@@ -16,9 +16,12 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 #include <net/if.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <arpa/inet.h>
 #include <linux/can.h>
 #include <pigpio.h>
@@ -73,6 +76,23 @@ static int blink_req; // from the paddles
 
 static atomic_bool inject_bad;
 
+// Ctrl+C or kill: threads stop touching GPIO, then pigpio is shut down
+static atomic_bool quit;
+
+static void on_signal(int sig)
+{
+  if (quit)
+    _exit(1); // second Ctrl+C: give up on the clean shutdown
+  quit = true;
+}
+
+static void fail(const char *what)
+{
+  perror(what);
+  gpioTerminate(); // never exit without this: pigpio's DMA would keep running
+  exit(EXIT_FAILURE);
+}
+
 static int64_t now_ms(void)
 {
   struct timespec ts;
@@ -119,7 +139,7 @@ static void *tick(void *arg)
   struct timespec next;
   clock_gettime(CLOCK_MONOTONIC, &next);
 
-  while (1) {
+  while (!quit) {
     next.tv_nsec += TICK_MS * 1000000;
     if (next.tv_nsec >= 1000000000) {
       next.tv_nsec -= 1000000000;
@@ -141,7 +161,8 @@ static void *tick(void *arg)
       other_fault |= zone_fault[z];
     }
     bool test = test_fault;
-    bool error = test || other_fault || failed[0] || failed[1] || now - last_udp_ms > TIMEOUT_MS;
+    int64_t udp_age = now - last_udp_ms;
+    bool error = test || other_fault || failed[0] || failed[1] || udp_age > TIMEOUT_MS;
     int blink = error ? BLINK_HAZARD : blink_req;
     pthread_mutex_unlock(&lock);
 
@@ -149,7 +170,8 @@ static void *tick(void *arg)
     gpioWrite(DEG_B_GPIO, !bus_ok[1]);
     gpioWrite(ERR_GPIO, error);
     if (error != was_error)
-      printf(error ? "ERROR\n" : "OK\n");
+      printf("%s: test %d, zone fault %d, N2 lost %d, N3 lost %d, last UDP %lld ms ago\n",
+             error ? "ERROR" : "OK", test, other_fault, failed[0], failed[1], (long long)udp_age);
     was_error = error;
 
     uint8_t hb[8] = { seq_hb++ & 0x0F, test, bus_ok[0] | bus_ok[1] << 1 };
@@ -212,10 +234,12 @@ static void *can_rx(void *arg)
 }
 
 // Enter on stdin: the next CTRL is out of range (bad-input test)
+// read(), not getchar(): getchar() locks stdin while it waits, and
+// gpioTerminate()'s fflush(NULL) would then wait forever for that lock
 static void *input(void *arg)
 {
-  int c;
-  while ((c = getchar()) != EOF)
+  char c;
+  while (read(STDIN_FILENO, &c, 1) == 1)
     if (c == '\n')
       inject_bad = true;
   return NULL;
@@ -225,6 +249,8 @@ int main()
 {
   if (gpioInitialise() < 0)
     exit(EXIT_FAILURE);
+  gpioSetSignalFunc(SIGINT, on_signal);
+  gpioSetSignalFunc(SIGTERM, on_signal);
   const int outputs[] = { UDP_RX_GPIO, CMD_TX_GPIO, DEG_A_GPIO, DEG_B_GPIO, ERR_GPIO,
                           can_tx_gpio[0], can_tx_gpio[1] };
   for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++) {
@@ -238,21 +264,21 @@ int main()
   ifindex[0] = if_nametoindex("canA");
   ifindex[1] = if_nametoindex("canB");
   if (!ifindex[0] || !ifindex[1] ||
-      bind(can_fd, (struct sockaddr *)&can_addr, sizeof(can_addr)) < 0) {
-    perror("can");
-    exit(EXIT_FAILURE);
-  }
+      bind(can_fd, (struct sockaddr *)&can_addr, sizeof(can_addr)) < 0)
+    fail("can");
 
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   struct sockaddr_in servaddr = { .sin_family = AF_INET, .sin_port = htons(R_PORT) };
   servaddr.sin_addr.s_addr = inet_addr(LOCAL_HOST);
-  if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-    perror("udp");
-    exit(EXIT_FAILURE);
-  }
+  if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+    fail("udp");
 
-  pthread_t tid;
-  pthread_create(&tid, NULL, tick, NULL);
+  // recv() gives up after 100 ms, so the loop sees `quit` even with no UDP
+  struct timeval timeout = { .tv_usec = 100000 };
+  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+  pthread_t tick_tid, tid;
+  pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&tid, NULL, can_rx, NULL);
   pthread_create(&tid, NULL, input, NULL);
 
@@ -262,7 +288,7 @@ int main()
   bool prev_left = false, prev_right = false, prev_test = false, turned = false;
   int64_t last_test_press = 0;
 
-  while (1) {
+  while (!quit) {
     if (recv(sockfd, buf, sizeof(buf), 0) <= 4)
       continue;
     toggle(UDP_RX_GPIO);
@@ -309,4 +335,9 @@ int main()
     send_both(ID_CTRL, d);
     toggle(CMD_TX_GPIO);
   }
+
+  // can_rx and input never touch GPIO, so only tick has to stop first
+  pthread_join(tick_tid, NULL);
+  gpioTerminate();
+  return 0;
 }
