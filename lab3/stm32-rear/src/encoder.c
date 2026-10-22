@@ -1,13 +1,7 @@
 /*
- * Wheel encoders, x4 quadrature decoding.
- *
- * The A/B pins (D6-D9) aren't on a timer's CH1/CH2 pair, so hardware encoder
- * mode isn't available: count edges in GPIO interrupts instead. Every edge of
- * A and B interrupts, and a lookup table turns the old and new A/B state into
- * +1, -1 or 0 (no change, or an invalid jump where both pins changed).
- *
- * The pins use EXTI lines 7-10. STM32 has one EXTI line per pin number across
- * all ports, so no other interrupt pin can be pin 7-10 on any port.
+ * Wheel encoders, x4 quadrature decoding in GPIO interrupts (the pins aren't
+ * on a timer's encoder inputs). Every A/B edge interrupts, and a table turns
+ * the old and new A/B state into +1, -1 or 0 (no change, or an invalid jump).
  */
 
 #include <zephyr/kernel.h>
@@ -49,10 +43,8 @@ static const int8_t step[16] = {
 /* Read by threads, so atomic */
 static atomic_t count[2];
 
-/*
- * Only touched by that side's ISRs, which can't preempt each other as long as
- * EXTI9_5 and EXTI15_10 keep the same priority
- */
+/* Only touched by that side's ISRs, which all have the same priority, so
+ * they can't preempt each other */
 static uint8_t prev[2];
 
 /* A and B of one encoder are on different ports: one callback per pin */
@@ -122,11 +114,6 @@ int encoder_init(void)
 	}
 
 	return 0;
-}
-
-int32_t encoder_count(enum side s)
-{
-	return atomic_get(&count[s]);
 }
 
 /*

@@ -6,22 +6,22 @@ Lab 3: Dual-Redundant CAN and Real-Time Analysis (due 2026-10-22, 11:59pm). The 
 
 ```
 lab3/
-  pi/proxy_receiver/   N1: Lab 2 C receiver (UDP -> UART, pigpio). UART write gets replaced by SocketCAN on can0/can1.
+  pi/proxy_receiver/   N1 cockpit (C, pigpio, SocketCAN on canA/canB). Payload layouts are in the receiver.c header comment.
   stm32-common/        Not an app. .c/.h shared by both STM32 nodes; each node's CMakeLists.txt adds them.
   stm32-front/         N2 steering app (NODE_ID=2): servo
   stm32-rear/          N3 drivetrain app (NODE_ID=3): drive (PI loop), motor, encoder
+  stm32-can-test/      Bring-up test, same build on both boards: counter on A and B, prints RX. Uses the front overlay
   Schematic/           Lab 2 KiCad project, base for the dual-bus schematic
 ```
-Both apps build, but no Lab 3 code exists yet. They're the Lab 2 actuator code with the UART link and current sensors removed.
-- `stm32-common/` holds Lab 2 `blinker` and `errorstate`. Neither is compiled yet: both still use Lab 2 assumptions (all four blinker LEDs on one node, a self-timed blinker, a UART link timer, direct calls into `drive`/`servo`). Add each to both `CMakeLists.txt` once it's ported.
+Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). `blinker` follows BLINK; the test button is B1 (PC13), handled in `errorstate`. `errorstate` also feeds the IWDG (100 ms). FORCE_TX runs in the front main(). Not done yet: RELAY (and its RELAY_TX pin; A4/A5 are free on the front).
 - Common code must not reference node-only hardware or modules. Both overlays need the same node labels for shared hardware (CAN, DEG_A/B, ERR, blinkers). Node differences go through `NODE_ID` or init arguments from each `main.c`.
-- The `app.overlay` files still use the Lab 2 pins. Their header comments list the pins that collide with the handout's suggested CAN wiring (SPI1 is disabled, and blinkers/motor PWM sit on SPI1/CS/INT pins).
+- Both `app.overlay` files use the same CAN wiring, which differs from the handout's suggested wiring: SPI1 on D3 (SCK), D5 (MISO) and D4 (MOSI); CS A = D10, B = D9; INT A = D6, B = D7. The rear's Lab 2 pins that collided with it were moved (see its header comment).
 
 ## System
 
 ```
 Logitech wheel --USB--> laptop proxy --UDP:8000 (20 ms)--> Pi (N1, cockpit)
-                                                            │ can0 = bus A, can1 = bus B
+                                                            │ canA = bus A, canB = bus B
                        CAN A ════════╪═══════════╪═══════════╪════  500 kbit/s, 120 Ω each end
                        CAN B ════════╪═══════════╪═══════════╪════  500 kbit/s, 120 Ω each end
                                 N2 steering   N3 drivetrain
@@ -148,10 +148,20 @@ west build -p always -b nucleo_f401re -d build-rear  lab3/stm32-rear    # N3
 west flash -d build-front                                                # flash one board at a time
 west build -p always -b nucleo_f401re ../zephyr/samples/drivers/can/counter -- -DDTC_OVERLAY_FILE=<overlay>   # Part 0 bring-up
 ```
-Pi bring-up: add `dtparam=spi=on` and the two `mcp2515-can0`/`can1` overlays to `/boot/firmware/config.txt`, then:
+Pi bring-up: add `dtparam=spi=on` and the two `mcp2515-can0`/`can1` overlays to `/boot/firmware/config.txt`.
+
+The kernel names CAN interfaces in probe order, not by chip select: on our Pi, `can0` came up as the CE1 module (bus B). A udev rule names them by chip select instead. It lives only on the Pi's SD card, so redo it after a re-flash:
 ```sh
-sudo ip link set can0 up type can bitrate 500000   # same for can1
-ip -details link show can0                          # expect ERROR-ACTIVE
+sudo tee /etc/udev/rules.d/70-can-names.rules <<'EOF'
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="spi0.0", NAME="canA"
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="spi0.1", NAME="canB"
+EOF
+sudo reboot
+```
+If `ip link` shows `can0`/`can1` instead, the rule didn't match. Then:
+```sh
+sudo ip link set canA up type can bitrate 500000   # same for canB (pi/proxy_receiver/run.sh does this plus build and start)
+ip -details link show canA                          # expect ERROR-ACTIVE
 candump -c -t d any
 ```
 Useful upstream references (read-only):

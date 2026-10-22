@@ -11,9 +11,6 @@ enum side {
 /* Configure the A/B pins and their interrupts */
 int encoder_init(void);
 
-/* Raw signed tick count since init; sign follows the direction of travel */
-int32_t encoder_count(enum side s);
-
 /* Velocity is the tick change over the last ENCODER_WINDOW samples */
 #define ENCODER_SAMPLE_MS 1
 #define ENCODER_WINDOW 10	/* 10 * 1 ms = 10 ms; full speed is ~71 */

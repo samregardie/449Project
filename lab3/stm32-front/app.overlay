@@ -1,12 +1,8 @@
 /*
  * N2 (front, steering) pin assignments for the Nucleo-F401RE.
- *
- * Still the Lab 2 pins, split out for this node. Before adding the two
- * MCP2515s (handout Part 1 and Appendix B):
- * - SPI1 is disabled below and must be enabled for CAN.
- * - FR (D12) sits on the SPI1 pins (D11-D13), so it has to move.
- * - Common code expects the same node labels on both nodes (CAN, DEG_A/B,
- *   ERR, blinkers), so pick names that work for front and rear.
+ * The CAN wiring is the same on both nodes; stm32-can-test uses this file.
+ * Common code needs the same labels on both nodes (CAN, DEG_A/B, ERR,
+ * blinkers, CAN test points).
  *
  * Pitfalls:
  * - The board file already gives many header pins to SPI/I2C/UART/PWM. The
@@ -15,11 +11,51 @@
  * - GPIOs use Arduino names (D2, A5); PWM pinctrl uses MCU names (PA10).
  *   Both refer to the same pins.
  * - D13 (PA5) also drives the green LD2.
+ * - Interrupt pins need different pin numbers (one EXTI line per number).
+ *   In use: CAN INT 10 and 8, test button 13.
  */
 
+/ {
+    aliases {
+        can-a = &can_a;
+        can-b = &can_b;
+    };
+
+    chosen {
+        zephyr,canbus = &can_a;	/* only for samples like can/counter */
+    };
+};
+
 /* Board peripherals that claim pins we use */
-&spi1 {		/* D11-D13 */
-	status = "disabled";
+&spi1 {
+    status = "okay";
+    /* Set pins to: SCK PB3, MISO PB4, MOSI PB5 */
+    pinctrl-0 = <&spi1_sck_pb3 &spi1_miso_pb4 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+    
+    /* Entry 0 -> reg <0>, entry 1 -> reg <1> */
+    cs-gpios = <&gpiob 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,  /* D10: CAN A CS */
+           <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D9:  CAN B CS */
+
+    can_a: mcp2515@0 {
+        compatible = "microchip,mcp2515";
+        reg = <0>;                          /* index into cs-gpios */
+        spi-max-frequency = <10000000>;     /* MCP2515 limit; see note on actual clock */
+        int-gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;  /* D6: module D6 INT */
+        osc-freq = <16000000>;
+        bitrate = <500000>;
+        status = "okay";
+    };
+
+    can_b: mcp2515@1 {
+        compatible = "microchip,mcp2515";
+        reg = <1>;
+        spi-max-frequency = <10000000>;
+        int-gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;   /* D7: module D6 INT */
+        osc-freq = <16000000>;
+        bitrate = <500000>;
+        status = "okay";
+    };
 };
 
 &usart1 {	/* D10 */
@@ -54,11 +90,11 @@
 	blinkers {
 		compatible = "gpio-leds";
 
-		blink_fl: blink_fl {
+		blink_left: blink_fl {
 			gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
 		};
 
-		blink_fr: blink_fr {
+		blink_right: blink_fr {
 			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
 		};
 	};
@@ -66,5 +102,18 @@
 	zephyr,user {
 		pwms = <&pwm5 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
 		pwm-names = "servo";
+
+		/* LEDs and test points */
+		deg-a-gpios = <&arduino_header ARDUINO_HEADER_R3_A1 GPIO_ACTIVE_HIGH>;
+		deg-b-gpios = <&arduino_header ARDUINO_HEADER_R3_A2 GPIO_ACTIVE_HIGH>;
+		err-gpios = <&arduino_header ARDUINO_HEADER_R3_A3 GPIO_ACTIVE_HIGH>;
+		can-rx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D2 GPIO_ACTIVE_HIGH>;
+		can-rx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D8 GPIO_ACTIVE_HIGH>;
+		can-tx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
+		can-tx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&iwdg {
+	status = "okay";
 };

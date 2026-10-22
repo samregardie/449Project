@@ -2,35 +2,27 @@
 #define ERRORSTATE_H
 
 #include <stdbool.h>
-#include <stdint.h>
-
-#include <zephyr/sys/util.h>	/* BIT() */
 
 /*
- * Sole owner of the error state; callers report events. ISR-safe.
- * Parser: call errorstate_frame_ok() before drive_command().
+ * Error state, HB_TX, HB_MON and the test button (B1). In error while any
+ * of: an own fault (test button, bad CTRL), another zone's HB reports a
+ * fault, a zone is silent on both buses, or no valid CTRL for 60 ms. Our HB
+ * carries only own faults, so zones don't hold each other in error.
  */
 
-/* In the error state while any bit is set */
-#define ERR_POWERUP	    BIT(0)
-#define ERR_LINK_LOST	BIT(1)
-#define ERR_BAD_CMD	    BIT(2)
-#define ERR_SELFTEST	BIT(3)	/* cleared only by errorstate_selftest_exit() */
+/* 3 missed heartbeats or CTRLs at 20 ms */
+#define ZONE_TIMEOUT_MS 60
 
-/* 3 missed commands at a 20 ms period */
-#define LINK_TIMEOUT_MS (3 * 20)
+/* Called when the error state flips, maybe from an ISR: must not block */
+typedef void (*errorstate_cb_t)(bool error);
 
-/* Valid frame: clears all but ERR_SELFTEST, restarts the link timer */
-void errorstate_frame_ok(void);
+/* Call before canbus_init() (registers the HB handlers). Starts in error */
+int errorstate_init(errorstate_cb_t on_change);
 
-/* Well-formed but out of range; malformed frames are just dropped */
-void errorstate_out_of_range(void);
+/* Valid CTRL: clears the bad-CTRL fault, restarts the CTRL timeout */
+void errorstate_ctrl_ok(void);
 
-/* Enter on every press edge; exit on the second press of a double */
-void errorstate_selftest_enter(void);
-void errorstate_selftest_exit(void);
-
-bool errorstate_active(void);
-uint32_t errorstate_causes(void);	/* ERR_* mask */
+/* Out-of-range CTRL: own fault, sends FAULT */
+void errorstate_bad_ctrl(void);
 
 #endif

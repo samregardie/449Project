@@ -10,7 +10,7 @@
 
 static const struct pwm_dt_spec servo = PWM_DT_SPEC_GET_BY_NAME(DT_PATH(zephyr_user), servo);
 
-/* Also set from the link timer ISR, so always under the lock */
+/* Also set from the test-button ISR (via errorstate), so under the lock */
 static struct k_spinlock lock;
 static bool error = true;	/* power-up is the error state */
 

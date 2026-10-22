@@ -7,6 +7,6 @@ target_compile_definitions(app PRIVATE NODE_ID=3)
 
 set(COMMON ${CMAKE_CURRENT_SOURCE_DIR}/../stm32-common)
 
-# Common files (blinker, errorstate) are added here once they're ported to CAN
-target_sources(app PRIVATE src/main.c src/drive.c src/motor.c src/encoder.c)
+target_sources(app PRIVATE src/main.c src/drive.c src/motor.c src/encoder.c ${COMMON}/src/canbus.c
+	${COMMON}/src/ctrl.c ${COMMON}/src/errorstate.c ${COMMON}/src/blinker.c)
 target_include_directories(app PRIVATE include ${COMMON}/include)
