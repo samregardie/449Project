@@ -12,6 +12,7 @@ lab3/
   stm32-rear/          N3 drivetrain app (NODE_ID=3): drive (PI loop), motor, encoder
   stm32-can-test/      Bring-up test, same build on both boards: counter on A and B, prints RX. Uses the front overlay
   Schematic/           Lab 2 KiCad project, base for the dual-bus schematic
+  pins.md              Every pin assignment (old and new) for all three nodes; keep in sync with the overlays
 ```
 Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). `blinker` follows BLINK; the test button is B1 (PC13), handled in `errorstate`. `errorstate` also feeds the IWDG (100 ms). FORCE_TX runs in the front main(). Not done yet: RELAY (and its RELAY_TX pin; A4/A5 are free on the front).
 - Common code must not reference node-only hardware or modules. Both overlays need the same node labels for shared hardware (CAN, DEG_A/B, ERR, blinkers). Node differences go through `NODE_ID` or init arguments from each `main.c`.
