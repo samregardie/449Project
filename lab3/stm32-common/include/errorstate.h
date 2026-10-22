@@ -4,10 +4,10 @@
 #include <stdbool.h>
 
 /*
- * Error state, HB_TX and HB_MON. In error while any of: an own fault (test
- * button, bad CTRL), another zone's HB reports a fault, a zone is silent on
- * both buses, or no valid CTRL for 60 ms. Our HB carries only own faults,
- * so zones don't hold each other in error.
+ * Error state, HB_TX, HB_MON and the test button (B1). In error while any
+ * of: an own fault (test button, bad CTRL), another zone's HB reports a
+ * fault, a zone is silent on both buses, or no valid CTRL for 60 ms. Our HB
+ * carries only own faults, so zones don't hold each other in error.
  */
 
 /* 3 missed heartbeats or CTRLs at 20 ms */
@@ -24,8 +24,5 @@ void errorstate_ctrl_ok(void);
 
 /* Out-of-range CTRL: own fault, sends FAULT */
 void errorstate_bad_ctrl(void);
-
-/* Debounced test button press: one enters, a second within 500 ms exits */
-void errorstate_test_pressed(void);
 
 #endif

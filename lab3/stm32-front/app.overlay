@@ -95,11 +95,11 @@
 	blinkers {
 		compatible = "gpio-leds";
 
-		blink_fl: blink_fl {
+		blink_left: blink_fl {
 			gpios = <&arduino_header ARDUINO_HEADER_R3_D14 GPIO_ACTIVE_HIGH>;
 		};
 
-		blink_fr: blink_fr {
+		blink_right: blink_fr {
 			gpios = <&arduino_header ARDUINO_HEADER_R3_D12 GPIO_ACTIVE_HIGH>;
 		};
 	};

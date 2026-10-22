@@ -11,6 +11,7 @@
 #include "errorstate.h"
 
 #define HB_PERIOD_MS 20
+#define DEBOUNCE_MS 50
 #define DOUBLE_PRESS_MS 500
 
 /* TODO (team): justify in the RTA */
@@ -33,6 +34,10 @@ static const struct gpio_dt_spec deg[BUS_COUNT] = {
 	GPIO_DT_SPEC_GET(USER_NODE, deg_b_gpios),
 };
 static const struct gpio_dt_spec err_pin = GPIO_DT_SPEC_GET(USER_NODE, err_gpios);
+
+/* Test button: the Nucleo's blue user button B1 (PC13) */
+static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
+static struct gpio_callback button_cb;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
@@ -119,13 +124,51 @@ static void on_hb(const struct can_frame *f)
 	atomic_set(&zone_fault[f->id - CAN_ID_HB_N1 + 1], f->data[1]);
 }
 
+/* One press enters, a second within 500 ms exits */
+static void test_pressed(void)
+{
+	uint32_t now = k_uptime_get_32();
+	bool double_press = (atomic_get(&own_faults) & OWN_TEST) &&
+			    now - atomic_get(&last_press_ms) <= DOUBLE_PRESS_MS;
+
+	if (double_press) {
+		atomic_and(&own_faults, ~OWN_TEST);
+	} else {
+		atomic_or(&own_faults, OWN_TEST);
+		atomic_set(&pending_fault, FAULT_TEST_BUTTON);
+	}
+
+	atomic_set(&last_press_ms, now);
+	update();
+}
+
+/* ISR on both edges: a press counts only after 50 ms with no edges (bounce) */
+static void on_button(const struct device *port, struct gpio_callback *cb, uint32_t pins)
+{
+	static uint32_t last_edge_ms;
+	uint32_t now = k_uptime_get_32();
+
+	if (now - last_edge_ms > DEBOUNCE_MS && gpio_pin_get_dt(&button)) {
+		test_pressed();
+	}
+
+	last_edge_ms = now;
+}
+
 int errorstate_init(errorstate_cb_t cb)
 {
 	on_change = cb;
 
 	if (gpio_pin_configure_dt(&deg[BUS_A], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
-	    gpio_pin_configure_dt(&err_pin, GPIO_OUTPUT_ACTIVE) != 0) {
+	    gpio_pin_configure_dt(&err_pin, GPIO_OUTPUT_ACTIVE) != 0 ||
+	    gpio_pin_configure_dt(&button, GPIO_INPUT) != 0) {
+		return -EIO;
+	}
+
+	gpio_init_callback(&button_cb, on_button, BIT(button.pin));
+	if (gpio_add_callback_dt(&button, &button_cb) != 0 ||
+	    gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_BOTH) != 0) {
 		return -EIO;
 	}
 
@@ -150,22 +193,5 @@ void errorstate_bad_ctrl(void)
 {
 	atomic_or(&own_faults, OWN_BAD_CTRL);
 	atomic_set(&pending_fault, FAULT_BAD_CTRL);
-	update();
-}
-
-void errorstate_test_pressed(void)
-{
-	uint32_t now = k_uptime_get_32();
-	bool double_press = (atomic_get(&own_faults) & OWN_TEST) &&
-			    now - atomic_get(&last_press_ms) <= DOUBLE_PRESS_MS;
-
-	if (double_press) {
-		atomic_and(&own_faults, ~OWN_TEST);
-	} else {
-		atomic_or(&own_faults, OWN_TEST);
-		atomic_set(&pending_fault, FAULT_TEST_BUTTON);
-	}
-
-	atomic_set(&last_press_ms, now);
 	update();
 }

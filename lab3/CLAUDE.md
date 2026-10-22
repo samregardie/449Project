@@ -13,7 +13,7 @@ lab3/
   stm32-can-test/      Bring-up test, same build on both boards: counter on A and B, prints RX. Uses the front overlay
   Schematic/           Lab 2 KiCad project, base for the dual-bus schematic
 ```
-Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). Not done yet: blinker (Lab 2 version, not compiled; must follow BLINK only), test button, FORCE_TX, watchdog, RELAY, CAN_RX/TX test-point pins.
+Both apps build. `stm32-common/` has `canbus` (dedup, send on both), `ctrl` (CTRL CRC and range check) and `errorstate` (HB_TX, HB_MON, DEG/ERR, error state). `blinker` follows BLINK; the test button is B1 (PC13), handled in `errorstate`. Not done yet: FORCE_TX, watchdog, RELAY, CAN_RX/TX test-point pins.
 - Common code must not reference node-only hardware or modules. Both overlays need the same node labels for shared hardware (CAN, DEG_A/B, ERR, blinkers). Node differences go through `NODE_ID` or init arguments from each `main.c`.
 - Both `app.overlay` files use the same CAN wiring, which differs from the handout's suggested wiring: SPI1 on D3 (SCK), D5 (MISO) and D4 (MOSI); CS A = D10, B = D9; INT A = D6, B = D7. The rear's Lab 2 pins that collided with it were moved (see its header comment).
 
