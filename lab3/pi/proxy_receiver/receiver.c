@@ -3,7 +3,8 @@
  *
  * Payloads (byte 0 = seq in the low nibble):
  *   CTRL   steer int16 LE (-100..100), throttle, brake (0..100), buttons, CRC-8 of bytes 0-5
- *   HB     own fault (0/1), bus health (bit0 = A ok, bit1 = B ok)
+ *   HB     own fault (0/1), bus health (bit0 = A ok, bit1 = B ok). N1's own
+ *          fault is the test button or a lost wheel link.
  *   BLINK  state (off/left/right/hazard), phase (1 = lamps on)
  *   FAULT  zone, reason
  *   FORCE  int8
@@ -18,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <net/if.h>
 #include <sys/socket.h>
@@ -57,7 +59,9 @@ enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
 
 #define TICK_MS 20
 #define BLINK_TICKS 25    // toggle every 500 ms = 1 Hz
-#define TIMEOUT_MS 60     // 3 missed heartbeats or UDP updates
+#define HB_TIMEOUT_MS 60  // 3 missed heartbeats
+#define RELAY_DETECT_MS 30 // one missed heartbeat, plus margin (same as the STM32 relay)
+#define UDP_TIMEOUT_MS 200 // wheel link lost. TODO (team): justify; Wi-Fi gaps exceed 60 ms
 #define DOUBLE_PRESS_MS 500
 #define TURN_THRESHOLD 30 // blinker cancels after steering past this and back
 
@@ -153,8 +157,8 @@ static void *tick(void *arg)
 
     pthread_mutex_lock(&lock);
     for (int z = 0; z < 2; z++) {
-      bool seen_a = now - last_hb_ms[z][0] <= TIMEOUT_MS;
-      bool seen_b = now - last_hb_ms[z][1] <= TIMEOUT_MS;
+      bool seen_a = now - last_hb_ms[z][0] <= HB_TIMEOUT_MS;
+      bool seen_b = now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
       bus_ok[0] |= seen_a;
       bus_ok[1] |= seen_b;
       failed[z] = !seen_a && !seen_b;
@@ -162,7 +166,8 @@ static void *tick(void *arg)
     }
     bool test = test_fault;
     int64_t udp_age = now - last_udp_ms;
-    bool error = test || other_fault || failed[0] || failed[1] || udp_age > TIMEOUT_MS;
+    bool own_fault = test || udp_age > UDP_TIMEOUT_MS; // sent in HB_N1, so N2/N3 follow
+    bool error = own_fault || other_fault || failed[0] || failed[1];
     int blink = error ? BLINK_HAZARD : blink_req;
     pthread_mutex_unlock(&lock);
 
@@ -174,7 +179,7 @@ static void *tick(void *arg)
              error ? "ERROR" : "OK", test, other_fault, failed[0], failed[1], (long long)udp_age);
     was_error = error;
 
-    uint8_t hb[8] = { seq_hb++ & 0x0F, test, bus_ok[0] | bus_ok[1] << 1 };
+    uint8_t hb[8] = { seq_hb++ & 0x0F, own_fault, bus_ok[0] | bus_ok[1] << 1 };
     send_both(ID_HB_N1, hb);
 
     // FAULT once, when a zone is lost or the test button is pressed
@@ -204,7 +209,19 @@ static void *tick(void *arg)
   return NULL;
 }
 
-// Heartbeats from N2/N3, and FORCE forwarded to the proxy
+// N2 and N3 have no bus in common: one is silent on A, the other on B. Under `lock`.
+static bool split(int64_t now)
+{
+  bool silent[2][2];
+  for (int z = 0; z < 2; z++)
+    for (int b = 0; b < 2; b++)
+      silent[z][b] = now - last_hb_ms[z][b] > RELAY_DETECT_MS;
+  return (silent[0][0] && silent[1][1]) || (silent[0][1] && silent[1][0]);
+}
+
+// Heartbeats from N2/N3, and FORCE forwarded to the proxy.
+// RELAY: while N2 and N3 share no bus, their HBs and FAULTs go to the other bus
+// unchanged (same ID and seq, so receivers dedup). Everything else N1 sends on both.
 static void *can_rx(void *arg)
 {
   int udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -228,6 +245,16 @@ static void *can_rx(void *arg)
       pthread_mutex_unlock(&lock);
     } else if (f.can_id == ID_FORCE) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
+    }
+
+    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3 || f.can_id == ID_FAULT) {
+      pthread_mutex_lock(&lock);
+      bool relay = split(now_ms());
+      pthread_mutex_unlock(&lock);
+      if (relay) {
+        struct sockaddr_can to = { .can_family = AF_CAN, .can_ifindex = ifindex[!bus] };
+        sendto(can_fd, &f, sizeof(f), MSG_DONTWAIT, (struct sockaddr *)&to, sizeof(to));
+      }
     }
   }
   return NULL;
@@ -278,6 +305,13 @@ int main()
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
   pthread_t tick_tid, tid;
+  // SCHED_FIFO so Linux load can't delay HB_TX/HB_MON long enough to look like
+  // a lost zone. Threads created after this inherit it. Below the kernel's IRQ
+  // threads (50), which deliver our CAN frames.
+  struct sched_param sp = { .sched_priority = 40 };
+  if (sched_setscheduler(0, SCHED_FIFO, &sp) < 0)
+    perror("SCHED_FIFO");
+
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&tid, NULL, can_rx, NULL);
   pthread_create(&tid, NULL, input, NULL);

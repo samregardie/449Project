@@ -3,10 +3,14 @@
  * CTRL and the test button also update the error state right away.
  */
 
+#include <string.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/printk.h>
 
 #include "canbus.h"
 #include "errorstate.h"
@@ -48,8 +52,8 @@ static int wdt_channel;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
-static atomic_t zone_buses[4];		/* same, bus health bits */
-static atomic_t last_ctrl_ms;		/* 0 = never */
+static atomic_t ctrl_seen;		/* a valid CTRL has arrived since boot */
+static atomic_t bad_ctrl_ms;
 static atomic_t last_press_ms;
 static atomic_t pending_fault;		/* reason for the HB thread to send, 0 = none */
 
@@ -66,9 +70,7 @@ static bool heard(int zone, int bus)
 static void update(void)
 {
 	k_spinlock_key_t key = k_spin_lock(&lock);
-	uint32_t ctrl_ms = atomic_get(&last_ctrl_ms);
-	bool error = atomic_get(&own_faults) || ctrl_ms == 0 ||
-		     k_uptime_get_32() - ctrl_ms > ZONE_TIMEOUT_MS;
+	bool error = atomic_get(&own_faults) || !atomic_get(&ctrl_seen);
 
 	for (int z = 1; z <= 3; z++) {
 		if (z != NODE_ID && ((!heard(z, BUS_A) && !heard(z, BUS_B)) ||
@@ -84,6 +86,39 @@ static void update(void)
 	}
 
 	k_spin_unlock(&lock, key);
+}
+
+/*
+ * Debug (serial console, 115200): print every input of the error state
+ * whenever any of them changes. HB thread only: printk is slow and not for
+ * ISRs. Remove once the system works.
+ */
+static void print_status(void)
+{
+	static char last[128];
+	char line[128];
+	k_spinlock_key_t key = k_spin_lock(&lock);
+	bool error = in_error;
+
+	k_spin_unlock(&lock, key);
+
+	uint32_t own = atomic_get(&own_faults);
+	int n = snprintk(line, sizeof(line), "N%d %s: test=%d bad_ctrl=%d ctrl_seen=%d",
+			 NODE_ID, error ? "ERROR" : "ok", (own & OWN_TEST) != 0,
+			 (own & OWN_BAD_CTRL) != 0, (int)atomic_get(&ctrl_seen));
+
+	for (int z = 1; z <= 3; z++) {
+		if (z != NODE_ID) {
+			n += snprintk(line + n, sizeof(line) - n, " | N%d heard A=%d B=%d fault=%d", z,
+				      heard(z, BUS_A), heard(z, BUS_B),
+				      (int)atomic_get(&zone_fault[z]));
+		}
+	}
+
+	if (strcmp(line, last) != 0) {
+		printk("%s\n", line);
+		strcpy(last, line);
+	}
 }
 
 static void hb_loop(void *p1, void *p2, void *p3)
@@ -124,17 +159,17 @@ static void hb_loop(void *p1, void *p2, void *p3)
 		}
 
 		wdt_feed(wdt, wdt_channel);
+		print_status();
 	}
 }
 
-K_THREAD_DEFINE(hb_thread, 1024, hb_loop, NULL, NULL, NULL, HB_PRIO, 0, SYS_FOREVER_MS);
+K_THREAD_DEFINE(hb_thread, 1536, hb_loop, NULL, NULL, NULL, HB_PRIO, 0, SYS_FOREVER_MS);
 
 static void on_hb(const struct can_frame *f)
 {
 	int zone = f->id - CAN_ID_HB_N1 + 1;
 
 	atomic_set(&zone_fault[zone], f->data[1]);
-	atomic_set(&zone_buses[zone], f->data[2]);
 }
 
 /* One press enters, a second within 500 ms exits */
@@ -172,6 +207,14 @@ int errorstate_init(errorstate_cb_t cb)
 {
 	on_change = cb;
 
+	/* Debug: was the last reset the watchdog? */
+	uint32_t cause = 0;
+
+	hwinfo_get_reset_cause(&cause);
+	hwinfo_clear_reset_cause();
+	printk("N%d boot, reset cause 0x%x%s\n", NODE_ID, cause,
+	       (cause & RESET_WATCHDOG) ? " (WATCHDOG)" : "");
+
 	if (gpio_pin_configure_dt(&deg[BUS_A], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&err_pin, GPIO_OUTPUT_ACTIVE) != 0 ||
@@ -204,23 +247,19 @@ int errorstate_init(errorstate_cb_t cb)
 
 void errorstate_ctrl_ok(void)
 {
-	atomic_set(&last_ctrl_ms, k_uptime_get_32());
-	atomic_and(&own_faults, ~OWN_BAD_CTRL);
+	atomic_set(&ctrl_seen, 1);
+
+	if (k_uptime_get_32() - atomic_get(&bad_ctrl_ms) > BAD_CTRL_HOLD_MS) {
+		atomic_and(&own_faults, ~OWN_BAD_CTRL);
+	}
+
 	update();
 }
 
 void errorstate_bad_ctrl(void)
 {
+	atomic_set(&bad_ctrl_ms, k_uptime_get_32());
 	atomic_or(&own_faults, OWN_BAD_CTRL);
 	atomic_set(&pending_fault, FAULT_BAD_CTRL);
 	update();
-}
-
-uint8_t errorstate_buses(int zone)
-{
-	if (!heard(zone, BUS_A) && !heard(zone, BUS_B)) {
-		return 0;
-	}
-
-	return atomic_get(&zone_buses[zone]);
 }

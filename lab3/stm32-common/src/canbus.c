@@ -21,6 +21,9 @@
 #define MAX_HANDLERS 8		/* IDs this node receives */
 #define MAX_TX_IDS 4		/* IDs this node sends */
 
+/* Wait for a free TX buffer: a few frame times (270 us each) of normal traffic */
+#define TX_WAIT K_MSEC(2)
+
 /* TODO (team): justify in the RTA */
 #define DISPATCH_PRIO K_PRIO_PREEMPT(1)
 
@@ -54,6 +57,9 @@ struct handler {
 static struct handler handlers[MAX_HANDLERS];
 static int n_handlers;
 static canbus_tap_t tap;
+
+/* Set once canbus_init() has started both controllers; nothing is sent before */
+static atomic_t ready;
 
 static struct handler *find_handler(uint16_t id)
 {
@@ -177,6 +183,7 @@ int canbus_init(void)
 		}
 	}
 
+	atomic_set(&ready, 1);
 	return 0;
 }
 
@@ -209,16 +216,20 @@ static void tx_done(const struct device *dev, int error, void *user_data)
 }
 
 /*
- * -EAGAIN: all 3 TX buffers are stuck because nobody on this bus ACKs.
- * Restarting the controller drops them, so they aren't sent late.
+ * -EAGAIN: no TX buffer freed up within TX_WAIT, so all 3 are stuck because
+ * nobody on this bus ACKs. (TX_WAIT, not K_NO_WAIT, so a short burst such as
+ * the relay forwarding several frames doesn't count as stuck.) Restarting
+ * the controller drops them, so they aren't sent late.
+ * -ENETDOWN: an earlier restart failed and left the controller stopped, so
+ * try starting it again (can_stop() just returns -EALREADY then).
  */
 static int send_on(int b, const struct can_frame *f)
 {
 	gpio_pin_toggle_dt(&tp_tx[b]);
 
-	int ret = can_send(can[b], f, K_NO_WAIT, tx_done, NULL);
+	int ret = can_send(can[b], f, TX_WAIT, tx_done, NULL);
 
-	if (ret == -EAGAIN) {
+	if (ret == -EAGAIN || ret == -ENETDOWN) {
 		can_stop(can[b]);
 		can_start(can[b]);
 		ret = can_send(can[b], f, K_NO_WAIT, tx_done, NULL);
@@ -230,6 +241,10 @@ static int send_on(int b, const struct can_frame *f)
 int canbus_send(uint16_t id, const uint8_t data[8])
 {
 	struct can_frame f = { .id = id, .dlc = 8 };
+
+	if (!atomic_get(&ready)) {
+		return -ENETDOWN;
+	}
 
 	memcpy(f.data, data, 8);
 
@@ -246,6 +261,10 @@ int canbus_send(uint16_t id, const uint8_t data[8])
 
 int canbus_forward(enum canbus_bus bus, const struct can_frame *f)
 {
+	if (!atomic_get(&ready)) {
+		return -ENETDOWN;
+	}
+
 	k_mutex_lock(&tx_lock, K_FOREVER);
 
 	int ret = send_on(bus, f);

@@ -141,6 +141,9 @@
 		can-tx-a-gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>;
 		can-tx-b-gpios = <&gpioc 5 GPIO_ACTIVE_HIGH>;
 
+		/* Morpho CN7 pin 35 */
+		relay-tx-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;
+
 		/* Motor period (20 kHz) is a placeholder */
 		pwms = <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
 		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;
