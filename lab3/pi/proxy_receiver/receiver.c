@@ -31,11 +31,15 @@
 #include "state.h"
 
 /** Configure this **/
-#define LOCAL_HOST "172.26.166.54" // IP of local interface
+//#define LOCAL_HOST "172.26.166.54" // IP of local interface
 #define R_PORT 8000
 
-#define REMOTE_HOST "172.26.34.95"
+//#define REMOTE_HOST "172.26.34.95"
 #define S_PORT 8001
+
+#define LOCAL_HOST "192.168.50.1"
+#define REMOTE_HOST "192.168.50.2"
+
 /** **/
 
 // GPIOs (BCM numbers)
