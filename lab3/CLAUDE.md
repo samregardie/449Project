@@ -110,8 +110,8 @@ The handout table has the placeholder WCETs. Each WCET used in the report must s
 | 13  | -        | ERR        | RR        |
 
 Definitions:
-- CAN_TX_x toggles on the call that queues on that controller (our code: CTRL only, so the brake chain is easy to scope; the handout says every frame).
-- CAN_RX_x toggles in dispatch, after the SPI read (our code: CTRL only).
+- CAN_TX_x toggles on the call that queues on that controller.
+- CAN_RX_x toggles in dispatch, after the SPI read.
 - ERR is high while the node is in the error state.
 
 ## Analysis (Parts 3–4), for reviewing the team's numbers

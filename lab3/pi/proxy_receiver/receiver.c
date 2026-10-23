@@ -44,7 +44,7 @@
 #define DEG_A_GPIO 13
 #define DEG_B_GPIO 19
 #define ERR_GPIO 26
-static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B: toggle for CTRL only
+static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
 #define ID_CTRL 0x010
 #define ID_FAULT 0x020
@@ -128,8 +128,7 @@ static void send_both(uint16_t id, const uint8_t data[8])
 
   for (int b = 0; b < 2; b++) {
     struct sockaddr_can addr = { .can_family = AF_CAN, .can_ifindex = ifindex[b] };
-    if (id == ID_CTRL)
-      toggle(can_tx_gpio[b]);
+    toggle(can_tx_gpio[b]);
     sendto(can_fd, &f, sizeof(f), MSG_DONTWAIT, (struct sockaddr *)&addr, sizeof(addr));
   }
 }
