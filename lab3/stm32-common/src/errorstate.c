@@ -3,10 +3,14 @@
  * CTRL and the test button also update the error state right away.
  */
 
+#include <string.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/printk.h>
 
 #include "canbus.h"
 #include "errorstate.h"
@@ -84,6 +88,39 @@ static void update(void)
 	k_spin_unlock(&lock, key);
 }
 
+/*
+ * Debug (serial console, 115200): print every input of the error state
+ * whenever any of them changes. HB thread only: printk is slow and not for
+ * ISRs. Remove once the system works.
+ */
+static void print_status(void)
+{
+	static char last[128];
+	char line[128];
+	k_spinlock_key_t key = k_spin_lock(&lock);
+	bool error = in_error;
+
+	k_spin_unlock(&lock, key);
+
+	uint32_t own = atomic_get(&own_faults);
+	int n = snprintk(line, sizeof(line), "N%d %s: test=%d bad_ctrl=%d ctrl_seen=%d",
+			 NODE_ID, error ? "ERROR" : "ok", (own & OWN_TEST) != 0,
+			 (own & OWN_BAD_CTRL) != 0, (int)atomic_get(&ctrl_seen));
+
+	for (int z = 1; z <= 3; z++) {
+		if (z != NODE_ID) {
+			n += snprintk(line + n, sizeof(line) - n, " | N%d heard A=%d B=%d fault=%d", z,
+				      heard(z, BUS_A), heard(z, BUS_B),
+				      (int)atomic_get(&zone_fault[z]));
+		}
+	}
+
+	if (strcmp(line, last) != 0) {
+		printk("%s\n", line);
+		strcpy(last, line);
+	}
+}
+
 static void hb_loop(void *p1, void *p2, void *p3)
 {
 	struct k_timer timer;
@@ -122,10 +159,11 @@ static void hb_loop(void *p1, void *p2, void *p3)
 		}
 
 		wdt_feed(wdt, wdt_channel);
+		print_status();
 	}
 }
 
-K_THREAD_DEFINE(hb_thread, 1024, hb_loop, NULL, NULL, NULL, HB_PRIO, 0, SYS_FOREVER_MS);
+K_THREAD_DEFINE(hb_thread, 1536, hb_loop, NULL, NULL, NULL, HB_PRIO, 0, SYS_FOREVER_MS);
 
 static void on_hb(const struct can_frame *f)
 {
@@ -168,6 +206,14 @@ static void on_button(const struct device *port, struct gpio_callback *cb, uint3
 int errorstate_init(errorstate_cb_t cb)
 {
 	on_change = cb;
+
+	/* Debug: was the last reset the watchdog? */
+	uint32_t cause = 0;
+
+	hwinfo_get_reset_cause(&cause);
+	hwinfo_clear_reset_cause();
+	printk("N%d boot, reset cause 0x%x%s\n", NODE_ID, cause,
+	       (cause & RESET_WATCHDOG) ? " (WATCHDOG)" : "");
 
 	if (gpio_pin_configure_dt(&deg[BUS_A], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
