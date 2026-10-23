@@ -48,8 +48,8 @@ static int wdt_channel;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
-static atomic_t zone_buses[4];		/* same, bus health bits */
-static atomic_t last_ctrl_ms;		/* 0 = never */
+static atomic_t ctrl_seen;		/* a valid CTRL has arrived since boot */
+static atomic_t bad_ctrl_ms;
 static atomic_t last_press_ms;
 static atomic_t pending_fault;		/* reason for the HB thread to send, 0 = none */
 
@@ -66,9 +66,7 @@ static bool heard(int zone, int bus)
 static void update(void)
 {
 	k_spinlock_key_t key = k_spin_lock(&lock);
-	uint32_t ctrl_ms = atomic_get(&last_ctrl_ms);
-	bool error = atomic_get(&own_faults) || ctrl_ms == 0 ||
-		     k_uptime_get_32() - ctrl_ms > ZONE_TIMEOUT_MS;
+	bool error = atomic_get(&own_faults) || !atomic_get(&ctrl_seen);
 
 	for (int z = 1; z <= 3; z++) {
 		if (z != NODE_ID && ((!heard(z, BUS_A) && !heard(z, BUS_B)) ||
@@ -134,7 +132,6 @@ static void on_hb(const struct can_frame *f)
 	int zone = f->id - CAN_ID_HB_N1 + 1;
 
 	atomic_set(&zone_fault[zone], f->data[1]);
-	atomic_set(&zone_buses[zone], f->data[2]);
 }
 
 /* One press enters, a second within 500 ms exits */
@@ -204,23 +201,19 @@ int errorstate_init(errorstate_cb_t cb)
 
 void errorstate_ctrl_ok(void)
 {
-	atomic_set(&last_ctrl_ms, k_uptime_get_32());
-	atomic_and(&own_faults, ~OWN_BAD_CTRL);
+	atomic_set(&ctrl_seen, 1);
+
+	if (k_uptime_get_32() - atomic_get(&bad_ctrl_ms) > BAD_CTRL_HOLD_MS) {
+		atomic_and(&own_faults, ~OWN_BAD_CTRL);
+	}
+
 	update();
 }
 
 void errorstate_bad_ctrl(void)
 {
+	atomic_set(&bad_ctrl_ms, k_uptime_get_32());
 	atomic_or(&own_faults, OWN_BAD_CTRL);
 	atomic_set(&pending_fault, FAULT_BAD_CTRL);
 	update();
-}
-
-uint8_t errorstate_buses(int zone)
-{
-	if (!heard(zone, BUS_A) && !heard(zone, BUS_B)) {
-		return 0;
-	}
-
-	return atomic_get(&zone_buses[zone]);
 }

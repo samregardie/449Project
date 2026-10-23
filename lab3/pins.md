@@ -24,8 +24,8 @@ Modules are 3.3 V only.
 | Signal | Old | New |
 |---|---|---|
 | Servo PWM (SRV) | A0 / PA0 (TIM5 CH1) | A0 / PA0 |
-| FL blinker | D14 / PB9 | D12 / PB9 |
-| FR blinker | D12 / PA6 | D14 / PA6 |
+| FL blinker | D14 / PB9 | D12 / PA6 |
+| FR blinker | D12 / PA6 | D14 / PB9 |
 | DEG_A | - | A1 / PA1 |
 | DEG_B | - | A2 / PA4 |
 | ERR | - | A3 / PB0 |
@@ -61,6 +61,7 @@ EXTI lines in use: CAN 10, 8; button 13.
 | DEG_A | - | PC10 (CN7 pin 1) | Arduino header full |
 | DEG_B | - | PC11 (CN7 pin 2) | |
 | ERR | - | PC12 (CN7 pin 3) | |
+| RELAY_TX | - | PC2 (CN7 pin 35) | Not in the handout's table: N3 also relays (N1/N2 split) |
 | CAN_RX_A | - | PC9 (CN10 pin 1) | |
 | CAN_RX_B | - | PC8 (CN10 pin 2) | |
 | CAN_TX_A | - | PC6 (CN10 pin 4) | |
@@ -102,9 +103,9 @@ The CAN pins must match `/boot/firmware/config.txt` (`interrupt=`). The udev rul
 | 7 | DEG_A GPIO13 | DEG_A A1 | DEG_A PC10 |
 | 8 | DEG_B GPIO19 | DEG_B A2 | DEG_B PC11 |
 | 9 | - | SRV A0 | PWM_SET A4 |
-| 10 | - | FL D14 | PWM_OUT D2 |
-| 11 | - | FR D12 | DIR_A D15 |
-| 12 | - | RELAY_TX A4 | RL D14 |
-| 13 | - | ERR A3 | RR D12 |
+| 10 | - | FL D12 | PWM_OUT D2 |
+| 11 | - | FR D14 | DIR_A D15 |
+| 12 | - | RELAY_TX A4 | RL D12 |
+| 13 | - | ERR A3 | RR D14 |
 
 The Pi's ERR (GPIO26) and N3's ERR (PC12) aren't in the handout's table, but wire them to LEDs: checkoff step 9 expects ERR high on all three.
