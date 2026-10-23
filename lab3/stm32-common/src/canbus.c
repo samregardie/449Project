@@ -211,6 +211,8 @@ static void tx_done(const struct device *dev, int error, void *user_data)
 /*
  * -EAGAIN: all 3 TX buffers are stuck because nobody on this bus ACKs.
  * Restarting the controller drops them, so they aren't sent late.
+ * -ENETDOWN: an earlier restart failed and left the controller stopped, so
+ * try starting it again (can_stop() just returns -EALREADY then).
  */
 static int send_on(int b, const struct can_frame *f)
 {
@@ -218,7 +220,7 @@ static int send_on(int b, const struct can_frame *f)
 
 	int ret = can_send(can[b], f, K_NO_WAIT, tx_done, NULL);
 
-	if (ret == -EAGAIN) {
+	if (ret == -EAGAIN || ret == -ENETDOWN) {
 		can_stop(can[b]);
 		can_start(can[b]);
 		ret = can_send(can[b], f, K_NO_WAIT, tx_done, NULL);
