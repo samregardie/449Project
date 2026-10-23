@@ -32,7 +32,7 @@ static const struct device *const can[BUS_COUNT] = {
 	DEVICE_DT_GET(DT_ALIAS(can_b)),
 };
 
-/* Test points */
+/* Test points: toggle for CTRL only, so the brake chain is easy to find on a scope */
 #define USER_NODE DT_PATH(zephyr_user)
 
 static const struct gpio_dt_spec tp_tx[BUS_COUNT] = {
@@ -109,7 +109,9 @@ static void dispatch(void *p1, void *p2, void *p3)
 
 	while (1) {
 		k_msgq_get(&rx_queue, &msg, K_FOREVER);
-		gpio_pin_toggle_dt(&tp_rx[msg.bus]);
+		if (msg.frame.id == CAN_ID_CTRL) {
+			gpio_pin_toggle_dt(&tp_rx[msg.bus]);
+		}
 
 		const struct can_frame *f = &msg.frame;
 		struct handler *h = find_handler(f->id);
@@ -225,7 +227,9 @@ static void tx_done(const struct device *dev, int error, void *user_data)
  */
 static int send_on(int b, const struct can_frame *f)
 {
-	gpio_pin_toggle_dt(&tp_tx[b]);
+	if (f->id == CAN_ID_CTRL) {	/* only the relay sends CTRL from an STM32 */
+		gpio_pin_toggle_dt(&tp_tx[b]);
+	}
 
 	int ret = can_send(can[b], f, TX_WAIT, tx_done, NULL);
 
