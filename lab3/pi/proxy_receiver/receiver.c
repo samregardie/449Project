@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <net/if.h>
 #include <sys/socket.h>
@@ -304,6 +305,13 @@ int main()
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
   pthread_t tick_tid, tid;
+  // SCHED_FIFO so Linux load can't delay HB_TX/HB_MON long enough to look like
+  // a lost zone. Threads created after this inherit it. Below the kernel's IRQ
+  // threads (50), which deliver our CAN frames.
+  struct sched_param sp = { .sched_priority = 40 };
+  if (sched_setscheduler(0, SCHED_FIFO, &sp) < 0)
+    perror("SCHED_FIFO");
+
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&tid, NULL, can_rx, NULL);
   pthread_create(&tid, NULL, input, NULL);
