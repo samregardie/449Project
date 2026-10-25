@@ -5,8 +5,9 @@
 	(uuid "d49efd27-068d-4972-b9a6-bb8a609ceab7")
 	(paper "D")
 	(title_block
-		(title "CAN Lab Scheumatic ")
-		(date "2026-10-22")
+		(title "18449 PCB LAB First Checkpoint")
+		(date "2026-10-25")
+		(rev "1.1")
 	)
 	(lib_symbols
 		(symbol "Amplifier_Current:INA181"
@@ -9680,18 +9681,6 @@
 			)
 		)
 		(uuid "a0bf2fcb-e15e-43be-9877-9a2e254e4c4c")
-	)
-	(text "Schematic is currently missing: \n- 6V power rail\n- Check the test points\n- Battery "
-		(exclude_from_sim no)
-		(at 778.256 494.03 0)
-		(effects
-			(font
-				(size 2.032 2.032)
-				(thickness 0.254)
-			)
-			(justify left)
-		)
-		(uuid "a0d2f967-51d5-48ac-8e9c-13d2fa867dec")
 	)
 	(text "Notes: \n- AGND and GND are shared\n- This layout doens't have pin 31 or 47, but they should be \ntied to ground and that seems correct on the PCB. They are \npotentially suppsoed to have a 2.2 uF cap\n- The 8Mhz oscillator is not connected "
 		(exclude_from_sim no)
@@ -28181,7 +28170,7 @@
 				)
 			)
 		)
-		(property "Value" "2.2uH"
+		(property "Value" "3.3uH"
 			(at 248.92 414.02 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -37072,7 +37061,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "330k"
+		(property "Value" "91K"
 			(at 295.91 454.6599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -37105,7 +37094,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor, US symbol"
+		(property "Description" "RES 91K OHM 1% 1/10W 0603"
 			(at 293.37 453.39 0)
 			(hide yes)
 			(show_name no)
@@ -39948,7 +39937,7 @@
 				)
 			)
 		)
-		(property "Value" "2.2uH"
+		(property "Value" "3.3uH"
 			(at 71.12 415.29 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -54463,7 +54452,7 @@
 				)
 			)
 		)
-		(property "Value" "2.2uH"
+		(property "Value" "3.3uH"
 			(at 433.07 416.56 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -62166,7 +62155,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "30k"
+		(property "Value" "10K"
 			(at 295.656 467.36 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -64552,7 +64541,7 @@
 				)
 			)
 		)
-		(property "Value" "PS1240P02BT"
+		(property "Value" "BUZZER"
 			(at 375.92 33.02 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65410,7 +65399,7 @@
 	)
 	(symbol
 		(lib_id "Device:PS1240P02BT")
-		(at 647.7 15.24 0)
+		(at 632.46 43.18 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -65421,7 +65410,7 @@
 		(fields_autoplaced yes)
 		(uuid "fb549776-6f0a-4af6-8c3c-b2abf7c5b2bb")
 		(property "Reference" "LS2"
-			(at 647.7 7.62 0)
+			(at 632.46 35.56 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -65430,8 +65419,8 @@
 				)
 			)
 		)
-		(property "Value" "PS1240P02BT"
-			(at 647.7 10.16 0)
+		(property "Value" "BUZZER"
+			(at 632.46 38.1 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -65441,7 +65430,7 @@
 			)
 		)
 		(property "Footprint" "PS1240P02BT:XDCR_PS1240P02BT"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65453,7 +65442,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65464,7 +65453,7 @@
 			)
 		)
 		(property "Description" "Buzzers Transducer, Externally Driven Piezo 3V 4kHz 60dB @ 3V, 10cm Through Hole PC Pins"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65476,7 +65465,7 @@
 			)
 		)
 		(property "MF" "TDK"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65488,7 +65477,7 @@
 			)
 		)
 		(property "MAXIMUM_PACKAGE_HEIGHT" "7.0mm"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65500,7 +65489,7 @@
 			)
 		)
 		(property "PACKAGE" "SIP-5 TDK"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65512,7 +65501,7 @@
 			)
 		)
 		(property "PRICE" "None"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65524,7 +65513,7 @@
 			)
 		)
 		(property "MP" "PS1240P02CT3"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -65536,7 +65525,7 @@
 			)
 		)
 		(property "AVAILABILITY" "Unavailable"
-			(at 647.7 15.24 0)
+			(at 632.46 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
