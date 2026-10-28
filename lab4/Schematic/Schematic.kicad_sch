@@ -14995,7 +14995,7 @@
 	)
 	(wire
 		(pts
-			(xy 123.19 443.23) (xy 123.19 448.31)
+			(xy 123.19 443.23) (xy 123.19 463.55)
 		)
 		(stroke
 			(width 0)
@@ -16575,16 +16575,6 @@
 	)
 	(wire
 		(pts
-			(xy 302.26 457.2) (xy 302.26 464.82)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "3126be5d-8523-47b2-bd01-40e6e849b94e")
-	)
-	(wire
-		(pts
 			(xy 476.25 454.66) (xy 476.25 459.74)
 		)
 		(stroke
@@ -16602,16 +16592,6 @@
 			(type default)
 		)
 		(uuid "315b73e1-c9e3-4746-ae08-aa11bb607ac8")
-	)
-	(wire
-		(pts
-			(xy 485.14 377.19) (xy 485.14 382.27)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "31cc212a-050a-4e9e-83ec-8841f2ddedf8")
 	)
 	(wire
 		(pts
@@ -18325,16 +18305,6 @@
 	)
 	(wire
 		(pts
-			(xy 123.19 455.93) (xy 123.19 463.55)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6155096a-71c0-4af5-b295-d0651647ef73")
-	)
-	(wire
-		(pts
 			(xy 527.05 119.38) (xy 519.43 119.38)
 		)
 		(stroke
@@ -19875,16 +19845,6 @@
 	)
 	(wire
 		(pts
-			(xy 485.14 454.66) (xy 485.14 462.28)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "8df19a81-4272-499a-b063-416c55cf02b1")
-	)
-	(wire
-		(pts
 			(xy 288.29 285.75) (xy 289.56 285.75)
 		)
 		(stroke
@@ -20315,7 +20275,7 @@
 	)
 	(wire
 		(pts
-			(xy 302.26 444.5) (xy 302.26 449.58)
+			(xy 302.26 444.5) (xy 302.26 464.82)
 		)
 		(stroke
 			(width 0)
@@ -20525,7 +20485,7 @@
 	)
 	(wire
 		(pts
-			(xy 123.19 388.62) (xy 123.19 396.24)
+			(xy 123.19 375.92) (xy 123.19 396.24)
 		)
 		(stroke
 			(width 0)
@@ -20955,7 +20915,7 @@
 	)
 	(wire
 		(pts
-			(xy 485.14 389.89) (xy 485.14 397.51)
+			(xy 485.14 377.19) (xy 485.14 397.51)
 		)
 		(stroke
 			(width 0)
@@ -21312,16 +21272,6 @@
 			(type default)
 		)
 		(uuid "b6b54a8a-b56c-4341-b463-615c51ed435a")
-	)
-	(wire
-		(pts
-			(xy 300.99 387.35) (xy 300.99 394.97)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "b6fd7b89-c127-49fe-a19f-0e9d7dc4fa3f")
 	)
 	(wire
 		(pts
@@ -21992,16 +21942,6 @@
 			(type default)
 		)
 		(uuid "c5ec3b0d-432b-4926-b58a-c6cdd4c3ad94")
-	)
-	(wire
-		(pts
-			(xy 123.19 375.92) (xy 123.19 381)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "c63ea373-bc07-4c78-b2ae-901090d96150")
 	)
 	(wire
 		(pts
@@ -23435,7 +23375,7 @@
 	)
 	(wire
 		(pts
-			(xy 300.99 374.65) (xy 300.99 379.73)
+			(xy 300.99 374.65) (xy 300.99 394.97)
 		)
 		(stroke
 			(width 0)
@@ -23535,7 +23475,7 @@
 	)
 	(wire
 		(pts
-			(xy 485.14 441.96) (xy 485.14 447.04)
+			(xy 485.14 441.96) (xy 485.14 462.28)
 		)
 		(stroke
 			(width 0)
@@ -26539,6 +26479,40 @@
 		)
 		(property "Component Class" "Z2_7_REG"
 			(at 206.4385 431.8 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+					(italic yes)
+				)
+				(justify left)
+			)
+		)
+	)
+	(netclass_flag ""
+		(length 2.54)
+		(shape round)
+		(at 358.14 165.1 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "fd088499-ed7b-45a6-ac14-0153f290efd2")
+		(property "Netclass" ""
+			(at -199.39 35.56 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Component Class" "CANB_Z3"
+			(at 358.8385 162.56 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -33065,88 +33039,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R_US")
-		(at 300.99 383.54 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "23aada17-568e-4dc7-aebf-61a6f0802647")
-		(property "Reference" "R37"
-			(at 303.53 382.2699 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 303.53 384.8099 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 299.974 383.286 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 300.99 383.54 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 300.99 383.54 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "37d3adae-f08e-4b7e-9c0f-f45e869b3e42")
-		)
-		(pin "1"
-			(uuid "b886aa86-6d35-41d8-a09e-95adc1dd0862")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R37")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:C")
 		(at 471.17 132.08 0)
 		(unit 1)
@@ -37628,88 +37520,6 @@
 			(project "Schematic"
 				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
 					(reference "#PWR0146")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R_US")
-		(at 302.26 453.39 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "38ce9c08-f94e-4ddd-a6af-2efd3208766d")
-		(property "Reference" "R77"
-			(at 304.8 452.1199 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 304.8 454.6599 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 301.244 453.136 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 302.26 453.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 302.26 453.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "6c2a7dda-ce8c-4d99-a900-c8f79f1b7235")
-		)
-		(pin "1"
-			(uuid "5138568f-8bdc-480c-81ef-6d0bb42692f9")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R77")
 					(unit 1)
 				)
 			)
@@ -45690,88 +45500,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R_US")
-		(at 123.19 384.81 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "59f62bd0-176c-43e2-aeda-f77c6b328da2")
-		(property "Reference" "R50"
-			(at 125.73 383.5399 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 125.73 386.0799 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 122.174 384.556 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 123.19 384.81 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 123.19 384.81 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "12917d77-1d73-4200-bd3b-3b2dc0c821ed")
-		)
-		(pin "1"
-			(uuid "917e30ee-254c-4e53-adfa-6ceb86e11987")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R50")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:PWR_FLAG")
 		(at 405.13 394.97 0)
 		(unit 1)
@@ -49940,88 +49668,6 @@
 			(project "Schematic"
 				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
 					(reference "D21")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R_US")
-		(at 123.19 452.12 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "6bc0a950-4572-48b9-8722-402232561cc6")
-		(property "Reference" "R56"
-			(at 125.73 450.8499 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 125.73 453.3899 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 122.174 451.866 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 123.19 452.12 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 123.19 452.12 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "9c120178-65fb-4181-8ebc-e4637bb057b9")
-		)
-		(pin "1"
-			(uuid "15afa322-9a75-4c21-8cac-6a3daa8c9527")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R56")
 					(unit 1)
 				)
 			)
@@ -62713,88 +62359,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R_US")
-		(at 485.14 386.08 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "a64915bc-4e45-4d65-b4f0-67904ea731d1")
-		(property "Reference" "R44"
-			(at 487.68 384.8099 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 487.68 387.3499 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 484.124 385.826 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 485.14 386.08 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 485.14 386.08 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "890ca921-278e-42a3-8828-68b0d17759be")
-		)
-		(pin "1"
-			(uuid "7c363f82-61be-41d8-aa8f-f3c2b850d3ea")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R44")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:GND")
 		(at 306.07 402.59 0)
 		(unit 1)
@@ -69830,88 +69394,6 @@
 			(project "Schematic"
 				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
 					(reference "R7")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R_US")
-		(at 485.14 450.85 180)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "c4aea361-0c25-44ee-abb9-37ef125e805b")
-		(property "Reference" "R62"
-			(at 487.68 449.5799 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Value" "53"
-			(at 487.68 452.1199 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 484.124 450.596 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 485.14 450.85 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor, US symbol"
-			(at 485.14 450.85 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "00295c66-b338-48d3-8114-8a3c180bd81d")
-		)
-		(pin "1"
-			(uuid "4aaeb9f5-feb6-41f3-97e3-6f5f34f7a2e7")
-		)
-		(instances
-			(project "Schematic"
-				(path "/d49efd27-068d-4972-b9a6-bb8a609ceab7"
-					(reference "R62")
 					(unit 1)
 				)
 			)
