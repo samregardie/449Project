@@ -52,8 +52,8 @@
         "zones": {
           "border_display_style": 2,
           "border_hatch_pitch": 0.5,
-          "corner_radius": 0.0,
-          "corner_smoothing": 0,
+          "corner_radius": 0.5,
+          "corner_smoothing": 2,
           "fill_mode": 0,
           "hatch_gap": 1.5,
           "hatch_orientation": 0.0,
@@ -63,7 +63,7 @@
           "min_clearance": 0.0,
           "min_island_area": 10.0,
           "min_thickness": 0.25,
-          "pad_connection": 1,
+          "pad_connection": 0,
           "remove_islands": 0,
           "thermal_relief_gap": 0.5,
           "thermal_relief_spoke_width": 0.5
@@ -178,6 +178,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -189,6 +190,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -200,6 +202,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -567,10 +570,10 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 1,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.5,
+        "track_width": 1.5,
         "tuning_profile": "",
-        "via_diameter": 1.0,
-        "via_drill": 0.5
+        "via_diameter": 2.0,
+        "via_drill": 1.2
       },
       {
         "bus_width": 12,
@@ -648,8 +651,8 @@
     "meta": {
       "version": 5
     },
-    "net_colors": null,
-    "netclass_assignments": null,
+    "net_colors": {},
+    "netclass_assignments": {},
     "netclass_patterns": [
       {
         "netclass": "PA[0..15]",
@@ -1186,7 +1189,7 @@
         "uuid": "d49efd27-068d-4972-b9a6-bb8a609ceab7"
       }
     ],
-    "used_designators": "#FLG1-16,A1,D1-54,#PWR1-264,Y1-8,FB1-2,C1-103,U1-22,F1-2,IC1-6,L1-9,LS1-2,J1-18,M1-2,JP1-34,R1-98,Z2_CAN_TX_A1,Q1-2,S1-5,TP1-86",
+    "used_designators": "#FLG1-16,#PWR1-264,A1,C1-103,D1-54,F1-2,FB1-2,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-2,R1-98,S1-5,TP1-86,U1-22,Y1-8,Z2_CAN_TX_A1",
     "variants": []
   },
   "sheets": [
