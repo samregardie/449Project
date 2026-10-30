@@ -14682,10 +14682,6 @@
 		(uuid "2e0729ed-7ddc-4ff0-8d43-f9a12067b689")
 	)
 	(no_connect
-		(at 617.22 114.3)
-		(uuid "2e2f8b57-5406-49dd-864c-ec7a4fcde5f6")
-	)
-	(no_connect
 		(at 44.45 64.77)
 		(uuid "30eb2e68-3902-4b1f-bd56-cb6f2ef4fe9a")
 	)
@@ -14756,6 +14752,10 @@
 	(no_connect
 		(at 44.45 74.93)
 		(uuid "5538bb63-7f61-40a3-ab18-4a033f641462")
+	)
+	(no_connect
+		(at 617.22 119.38)
+		(uuid "57a4fde8-bab5-4763-87b3-4190b1c2255e")
 	)
 	(no_connect
 		(at 267.97 222.25)
@@ -14914,12 +14914,12 @@
 		(uuid "cff77a8c-d0f7-42c0-8563-6b7f4d998313")
 	)
 	(no_connect
-		(at 260.35 115.57)
-		(uuid "d858ea00-2593-4a33-806b-91a156321cbd")
+		(at 617.22 121.92)
+		(uuid "d49d99f2-1f95-4541-aafe-e1d29098c184")
 	)
 	(no_connect
-		(at 617.22 116.84)
-		(uuid "dfed2e05-60c0-4d7f-98a2-673f8a66a6c0")
+		(at 260.35 115.57)
+		(uuid "d858ea00-2593-4a33-806b-91a156321cbd")
 	)
 	(no_connect
 		(at 267.97 311.15)
@@ -17051,6 +17051,16 @@
 	)
 	(wire
 		(pts
+			(xy 617.22 114.3) (xy 624.84 114.3)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "339fbc05-5986-4e85-940e-fe692ed4b90b")
+	)
+	(wire
+		(pts
 			(xy 713.74 88.9) (xy 731.52 88.9)
 		)
 		(stroke
@@ -18828,16 +18838,6 @@
 			(type default)
 		)
 		(uuid "6151d308-9060-4288-9092-29f76ba9e7e1")
-	)
-	(wire
-		(pts
-			(xy 624.84 121.92) (xy 617.22 121.92)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "61791316-9138-42ed-a0a1-c28154640578")
 	)
 	(wire
 		(pts
@@ -21061,16 +21061,6 @@
 	)
 	(wire
 		(pts
-			(xy 617.22 119.38) (xy 624.84 119.38)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a1457b0e-8a89-48c6-a93e-15c06c897d10")
-	)
-	(wire
-		(pts
 			(xy 110.49 64.77) (xy 114.3 64.77)
 		)
 		(stroke
@@ -21448,6 +21438,16 @@
 			(type default)
 		)
 		(uuid "ad8261cc-eb7a-4202-8adf-46651912cd8a")
+	)
+	(wire
+		(pts
+			(xy 617.22 116.84) (xy 624.84 116.84)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ad9d766d-b134-48b6-8c85-a0cc2a0e7e62")
 	)
 	(wire
 		(pts
@@ -24870,7 +24870,7 @@
 		(uuid "033a2b53-bd95-4bde-9e9a-7f20c9d6b0d8")
 	)
 	(label "Z3_CS_CAN_B"
-		(at 624.84 119.38 0)
+		(at 624.84 114.3 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -25790,7 +25790,7 @@
 		(uuid "840de240-84ff-46e5-a223-a8eb3e5dc43b")
 	)
 	(label "Z3_INT_CAN_B"
-		(at 624.84 121.92 0)
+		(at 624.84 116.84 0)
 		(effects
 			(font
 				(size 1.27 1.27)
