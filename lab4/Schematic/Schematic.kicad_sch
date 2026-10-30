@@ -86290,7 +86290,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "Z3_CAN_TX_B"
+		(property "Value" "CAN_TX_B"
 			(at 554.99 102.8699 90)
 			(show_name no)
 			(do_not_autoplace no)
