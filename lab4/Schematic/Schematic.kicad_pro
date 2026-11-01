@@ -106,15 +106,7 @@
           "Only 1 of the 3 shunt resistors will be occupied "
         ],
         [
-          "lib_footprint_mismatch|205450000|-116000000|fc00918c-c94f-463a-998b-0f8deef8239a|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
           "lib_footprint_mismatch|206620000|-115250000|564f17ce-b9bd-4dbb-a5dd-28502dfa2ecb|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "lib_footprint_mismatch|213500000|-142207500|a4752fec-e3c7-4d9e-a308-fd0c236758c6|00000000-0000-0000-0000-000000000000",
           ""
         ],
         [
@@ -227,6 +219,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -238,6 +231,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -249,6 +243,7 @@
         {
           "td_allow_use_two_tracks": true,
           "td_curve_segcount": 0,
+          "td_enabled": false,
           "td_height_ratio": 1.0,
           "td_length_ratio": 0.5,
           "td_maxheight": 2.0,
@@ -698,8 +693,8 @@
     "meta": {
       "version": 5
     },
-    "net_colors": null,
-    "netclass_assignments": null,
+    "net_colors": {},
+    "netclass_assignments": {},
     "netclass_patterns": [
       {
         "netclass": "PA[0..15]",
@@ -1236,7 +1231,7 @@
         "uuid": "d49efd27-068d-4972-b9a6-bb8a609ceab7"
       }
     ],
-    "used_designators": "#FLG1-16,A1,D1-54,#PWR1-264,Y1-8,FB1-2,C1-103,U1-22,F1-2,HS1,IC1-6,L1-9,LS1-2,J1-18,M1-2,JP1-34,R1-106,Z2_CAN_TX_A1,Q1-3,S1-5,TP1-86",
+    "used_designators": "#FLG1-16,#PWR1-264,A1,C1-103,D1-54,F1-2,FB1-2,HS1,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-3,R1-106,S1-5,TP1-86,U1-22,Y1-8,Z2_CAN_TX_A1",
     "variants": []
   },
   "sheets": [
