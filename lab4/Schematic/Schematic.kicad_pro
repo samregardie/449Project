@@ -39,9 +39,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.8,
-          "height": 1.27,
-          "width": 1.27
+          "drill": 1.0,
+          "height": 1.7,
+          "width": 1.7
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -52,8 +52,8 @@
         "zones": {
           "border_display_style": 2,
           "border_hatch_pitch": 0.5,
-          "corner_radius": 0.5,
-          "corner_smoothing": 2,
+          "corner_radius": 0.0,
+          "corner_smoothing": 0,
           "fill_mode": 0,
           "hatch_gap": 1.5,
           "hatch_orientation": 0.0,
@@ -76,7 +76,48 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        [
+          "courtyards_overlap|190235000|-84015000|1f33fb70-b526-44a7-9545-32ac50876ac4|65b6994b-e6f7-4656-81f8-3cdc6fce50d9",
+          ""
+        ],
+        [
+          "courtyards_overlap|193765000|-84015000|1f33fb70-b526-44a7-9545-32ac50876ac4|cf23c84d-5897-4022-8ccd-86402dcdb7c3",
+          ""
+        ],
+        [
+          "courtyards_overlap|195485000|-84015000|cf23c84d-5897-4022-8ccd-86402dcdb7c3|f6d71865-b5a4-4b98-a52a-e4f1808dec18",
+          ""
+        ],
+        [
+          "courtyards_overlap|199015000|-84015000|3dd031d2-f87d-4570-89cd-9c2fd79495fa|f6d71865-b5a4-4b98-a52a-e4f1808dec18",
+          ""
+        ],
+        [
+          "courtyards_overlap|201611011|-116745000|564f17ce-b9bd-4dbb-a5dd-28502dfa2ecb|fc00918c-c94f-463a-998b-0f8deef8239a",
+          "Alternate Shunt Resistor "
+        ],
+        [
+          "courtyards_overlap|205475000|-118125000|5b9cbf33-3906-45ab-8d0c-228604343230|fc00918c-c94f-463a-998b-0f8deef8239a",
+          "Alternate Shunt Resistor "
+        ],
+        [
+          "courtyards_overlap|210025000|-116745000|564f17ce-b9bd-4dbb-a5dd-28502dfa2ecb|5b9cbf33-3906-45ab-8d0c-228604343230",
+          "Only 1 of the 3 shunt resistors will be occupied "
+        ],
+        [
+          "lib_footprint_mismatch|206620000|-115250000|564f17ce-b9bd-4dbb-a5dd-28502dfa2ecb|00000000-0000-0000-0000-000000000000",
+          ""
+        ],
+        [
+          "pth_inside_courtyard|199000000|-115250000|3df706fd-8f5d-4a57-b5ce-b09fa0c891d3|fc00918c-c94f-463a-998b-0f8deef8239a",
+          "Alternate Shunt Resistor"
+        ],
+        [
+          "pth_inside_courtyard|214240000|-115250000|d06948eb-a29a-4b60-96db-f7f445509d16|fc00918c-c94f-463a-998b-0f8deef8239a",
+          "Alternate Shunt Resistor "
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -122,7 +163,7 @@
         "shorting_items": "error",
         "silk_edge_clearance": "warning",
         "silk_over_copper": "warning",
-        "silk_overlap": "warning",
+        "silk_overlap": "ignore",
         "skew_out_of_range": "error",
         "solder_mask_bridge": "error",
         "starved_thermal": "error",
@@ -214,6 +255,7 @@
       ],
       "track_widths": [
         0.0,
+        0.2,
         1.0,
         2.5
       ],
@@ -889,7 +931,7 @@
     "last_paths": {
       "idf": "",
       "netlist": "",
-      "plot": "../../../../../Downloads/",
+      "plot": "../Gerber/",
       "specctra_dsn": "",
       "step": "",
       "vrml": ""
@@ -936,37 +978,37 @@
           "show": true
         },
         {
-          "group_by": true,
+          "group_by": false,
           "label": "DNP",
           "name": "${DNP}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from BOM",
-          "name": "${EXCLUDE_FROM_BOM}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Board",
-          "name": "${EXCLUDE_FROM_BOARD}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Simulation",
-          "name": "${EXCLUDE_FROM_SIM}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Position Files",
-          "name": "${EXCLUDE_FROM_POS_FILES}",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
+          "label": "Exclude from BOM",
+          "name": "${EXCLUDE_FROM_BOM}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Board",
+          "name": "${EXCLUDE_FROM_BOARD}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Simulation",
+          "name": "${EXCLUDE_FROM_SIM}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Position Files",
+          "name": "${EXCLUDE_FROM_POS_FILES}",
+          "show": false
+        },
+        {
+          "group_by": true,
           "label": "Footprint",
           "name": "Footprint",
           "show": true
@@ -975,16 +1017,16 @@
           "group_by": false,
           "label": "Description",
           "name": "Description",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
           "label": "Datasheet",
           "name": "Datasheet",
-          "show": true
+          "show": false
         },
         {
-          "group_by": true,
+          "group_by": false,
           "label": "DigiKey_Part_Number",
           "name": "DigiKey_Part_Number",
           "show": true
@@ -1023,13 +1065,13 @@
           "group_by": false,
           "label": "Manufacturer_Name",
           "name": "Manufacturer_Name",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
           "label": "Manufacturer_Part_Number",
           "name": "Manufacturer_Part_Number",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
@@ -1132,6 +1174,24 @@
           "label": "SNAPEDA_PN",
           "name": "SNAPEDA_PN",
           "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MPN",
+          "name": "MPN",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Manufacturer",
+          "name": "Manufacturer",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "In_Class_Stock",
+          "name": "In_Class_Stock",
+          "show": true
         }
       ],
       "filter_string": "",
@@ -1139,7 +1199,7 @@
       "include_excluded_from_bom": true,
       "name": "",
       "sort_asc": true,
-      "sort_field": "Check_prices"
+      "sort_field": "AVAILABILITY"
     },
     "bus_aliases": {},
     "connection_grid_size": 50.0,
@@ -1190,7 +1250,7 @@
         "uuid": "d49efd27-068d-4972-b9a6-bb8a609ceab7"
       }
     ],
-    "used_designators": "#FLG1-16,#PWR1-264,A1,C1-103,D1-54,F1-2,FB1-2,HS1,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-3,R1-102,S1-5,TP1-86,U1-22,Y1-8,Z2_CAN_TX_A1",
+    "used_designators": "#FLG1-16,#PWR1-273,A1,C1-112,D1-54,F1-2,FB1-2,HS1,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-5,R1-112,S1-5,TP1-86,U1-22,Y1-10,Z2_CAN_TX_A1",
     "variants": []
   },
   "sheets": [
