@@ -978,37 +978,37 @@
           "show": true
         },
         {
-          "group_by": true,
+          "group_by": false,
           "label": "DNP",
           "name": "${DNP}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from BOM",
-          "name": "${EXCLUDE_FROM_BOM}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Board",
-          "name": "${EXCLUDE_FROM_BOARD}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Simulation",
-          "name": "${EXCLUDE_FROM_SIM}",
-          "show": true
-        },
-        {
-          "group_by": true,
-          "label": "Exclude from Position Files",
-          "name": "${EXCLUDE_FROM_POS_FILES}",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
+          "label": "Exclude from BOM",
+          "name": "${EXCLUDE_FROM_BOM}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Board",
+          "name": "${EXCLUDE_FROM_BOARD}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Simulation",
+          "name": "${EXCLUDE_FROM_SIM}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Exclude from Position Files",
+          "name": "${EXCLUDE_FROM_POS_FILES}",
+          "show": false
+        },
+        {
+          "group_by": true,
           "label": "Footprint",
           "name": "Footprint",
           "show": true
@@ -1017,16 +1017,16 @@
           "group_by": false,
           "label": "Description",
           "name": "Description",
-          "show": true
+          "show": false
         },
         {
           "group_by": false,
           "label": "Datasheet",
           "name": "Datasheet",
-          "show": true
+          "show": false
         },
         {
-          "group_by": true,
+          "group_by": false,
           "label": "DigiKey_Part_Number",
           "name": "DigiKey_Part_Number",
           "show": true
@@ -1065,13 +1065,13 @@
           "group_by": false,
           "label": "Manufacturer_Name",
           "name": "Manufacturer_Name",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
           "label": "Manufacturer_Part_Number",
           "name": "Manufacturer_Part_Number",
-          "show": false
+          "show": true
         },
         {
           "group_by": false,
@@ -1174,6 +1174,24 @@
           "label": "SNAPEDA_PN",
           "name": "SNAPEDA_PN",
           "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MPN",
+          "name": "MPN",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Manufacturer",
+          "name": "Manufacturer",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "In_Class_Stock",
+          "name": "In_Class_Stock",
+          "show": true
         }
       ],
       "filter_string": "",
@@ -1181,7 +1199,7 @@
       "include_excluded_from_bom": true,
       "name": "",
       "sort_asc": true,
-      "sort_field": "Check_prices"
+      "sort_field": "AVAILABILITY"
     },
     "bus_aliases": {},
     "connection_grid_size": 50.0,
@@ -1232,7 +1250,7 @@
         "uuid": "d49efd27-068d-4972-b9a6-bb8a609ceab7"
       }
     ],
-    "used_designators": "#FLG1-16,#PWR1-266,A1,C1-108,D1-54,F1-2,FB1-2,HS1,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-5,R1-110,S1-5,TP1-86,U1-22,Y1-8,Z2_CAN_TX_A1",
+    "used_designators": "#FLG1-16,#PWR1-273,A1,C1-112,D1-54,F1-2,FB1-2,HS1,IC1-6,J1-18,JP1-34,L1-9,LS1-2,M1-2,Q1-5,R1-112,S1-5,TP1-86,U1-22,Y1-10,Z2_CAN_TX_A1",
     "variants": []
   },
   "sheets": [
