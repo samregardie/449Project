@@ -1,13 +1,10 @@
 /*
  * N1 cockpit: wheel state over UDP in, CAN out on canA and canB.
  *
- * Payloads (byte 0 = seq in the low nibble):
- *   CTRL   steer int16 LE (-100..100), throttle, brake (0..100), buttons, CRC-8 of bytes 0-5
- *   HB     own fault (0/1), bus health (bit0 = A ok, bit1 = B ok). N1's own
- *          fault is the test button or a lost wheel link.
- *   BLINK  state (off/left/right/hazard), phase (1 = lamps on)
- *   FAULT  zone, reason
- *   FORCE  int8
+ * The message catalog and log entries are in lab5/stm32-common/include/catalog.h
+ * and the Raft config in raft_config.h, both shared with the STM32s (build.sh
+ * adds that folder to the include path). N1's HB fault is the test button or a
+ * lost wheel link.
  */
 
 #include <stdio.h>
@@ -29,6 +26,8 @@
 #include <pigpio.h>
 
 #include "state.h"
+#include "catalog.h"     // CAN IDs, payload layouts, log entries (shared with the STM32s)
+#include "raft_config.h" // Raft config (shared with the STM32s)
 
 /** Configure this **/
 //#define LOCAL_HOST "172.26.166.54" // IP of local interface
@@ -48,20 +47,11 @@
 #define DEG_A_GPIO 13
 #define DEG_B_GPIO 19
 #define ERR_GPIO 26
+#define LEADER_GPIO 16 // high while this node is the Raft leader
+#define SYNC_GPIO 20   // high while this node's clock follows global time
 static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
-#define ID_CTRL 0x010
-#define ID_FAULT 0x020
-#define ID_HB_N1 0x100
-#define ID_HB_N2 0x101
-#define ID_HB_N3 0x102
-#define ID_BLINK 0x200
-#define ID_FORCE 0x300
-
-enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
-enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
-
-#define TICK_MS 20
+#define TICK_MS RAFT_HEARTBEAT_MS // REF goes out on every tick
 #define BLINK_TICKS 25    // toggle every 500 ms = 1 Hz
 #define HB_TIMEOUT_MS 60  // 3 missed heartbeats
 #define RELAY_DETECT_MS 30 // one missed heartbeat, plus margin (same as the STM32 relay)
@@ -83,6 +73,17 @@ static bool test_fault;
 static int blink_req; // from the paddles
 
 static atomic_bool inject_bad;
+
+// Raft state. Only tick() uses it for now; put it under `lock` once can_rx()
+// changes it too (votes, APPEND from another leader).
+// With a default leader every node boots in term 1 with that leader (Part 2).
+static uint8_t term = RAFT_DEFAULT_LEADER != RAFT_NO_LEADER ? 1 : 0;
+static int leader = RAFT_DEFAULT_LEADER; // node ID, RAFT_NO_LEADER = none known
+static uint8_t cycle;                    // REF cycle counter; a new leader continues it
+
+// Global time = local monotonic clock + offset. The offset is 0 while the Pi
+// leads; when it follows another leader (checkoff 7), sync sets the offset.
+static int64_t global_offset_us;
 
 // Ctrl+C or kill: threads stop touching GPIO, then pigpio is shut down
 static atomic_bool quit;
@@ -106,6 +107,21 @@ static int64_t now_ms(void)
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+}
+
+// CLOCK_MONOTONIC, not wall time: NTP can step the wall clock, which would
+// make every follower's clock jump.
+static int64_t now_us(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+}
+
+// Current global time in us (Part 6.3)
+static int64_t global_gettime(void)
+{
+  return now_us() + global_offset_us;
 }
 
 static void toggle(int gpio)
@@ -137,11 +153,31 @@ static void send_both(uint16_t id, const uint8_t data[8])
   }
 }
 
-// Every 20 ms: HB_TX, HB_MON, FAULT, BLINK_TX. Only this thread sends these IDs.
+// REF (catalog.h): seq, term, cycle, global time in us (5 bytes, little-endian).
+// The time is read last, right before sending: anything after it is sync error.
+static void send_ref(uint8_t seq)
+{
+  uint8_t d[8] = { seq & CAN_SEQ_MASK, term, cycle++ };
+  uint64_t t = global_gettime();
+  for (int i = 0; i < 5; i++)
+    d[3 + i] = t >> (8 * i);
+  send_both(CAN_ID_REF(NODE_COCKPIT), d);
+}
+
+// APPEND (catalog.h): seq, term, prev index (2), prev term, commit index (2), entry.
+// No log yet, so this is the empty keep-alive: everything after term is 0.
+static void send_empty_append(uint8_t seq)
+{
+  uint8_t d[8] = { seq & CAN_SEQ_MASK, term, 0, 0, 0, 0, 0, ENTRY_NONE };
+  send_both(CAN_ID_APPEND(NODE_COCKPIT), d);
+}
+
+// Every 20 ms: REF and APPEND (while leader), HB_TX, HB_MON, FAULT, BLINK_TX.
+// Only this thread sends these IDs.
 static void *tick(void *arg)
 {
-  uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0;
-  int sent_blink = -1, ticks = 0;
+  uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0, seq_append = 0;
+  int sent_blink = -1, ticks = 0, append_ticks = 0;
   bool phase = false, was_error = false, was_test = false;
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
   struct timespec next;
@@ -154,6 +190,19 @@ static void *tick(void *arg)
       next.tv_sec++;
     }
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+
+    // Raft first, so the rest of the tick adds no jitter to REF. Sent in the
+    // error state too: leadership and sync don't depend on failure mode.
+    bool is_leader = leader == NODE_COCKPIT;
+    if (is_leader) {
+      send_ref(seq_ref++);
+      if (++append_ticks == RAFT_APPEND_MS / RAFT_HEARTBEAT_MS) {
+        append_ticks = 0;
+        send_empty_append(seq_append++);
+      }
+    }
+    gpioWrite(LEADER_GPIO, is_leader);
+    gpioWrite(SYNC_GPIO, is_leader); // the leader's clock is global time by definition
 
     int64_t now = now_ms();
     // A bus is degraded when we hear no other zone on it
@@ -183,20 +232,20 @@ static void *tick(void *arg)
              error ? "ERROR" : "OK", test, other_fault, failed[0], failed[1], (long long)udp_age);
     was_error = error;
 
-    uint8_t hb[8] = { seq_hb++ & 0x0F, own_fault, bus_ok[0] | bus_ok[1] << 1 };
-    send_both(ID_HB_N1, hb);
+    uint8_t hb[8] = { seq_hb++ & CAN_SEQ_MASK, own_fault, bus_ok[0] | bus_ok[1] << 1 };
+    send_both(CAN_ID_HB_N1, hb);
 
     // FAULT once, when a zone is lost or the test button is pressed
     for (int z = 0; z < 2; z++) {
       if (failed[z] && !was_failed[z]) {
-        uint8_t f[8] = { seq_fault++ & 0x0F, z + 2, FAULT_HB_LOST };
-        send_both(ID_FAULT, f);
+        uint8_t f[8] = { seq_fault++ & CAN_SEQ_MASK, z + 2, FAULT_HB_LOST };
+        send_both(CAN_ID_FAULT, f);
       }
       was_failed[z] = failed[z];
     }
     if (test && !was_test) {
-      uint8_t f[8] = { seq_fault++ & 0x0F, 1, FAULT_TEST_BUTTON };
-      send_both(ID_FAULT, f);
+      uint8_t f[8] = { seq_fault++ & CAN_SEQ_MASK, 1, FAULT_TEST_BUTTON };
+      send_both(CAN_ID_FAULT, f);
     }
     was_test = test;
 
@@ -206,8 +255,8 @@ static void *tick(void *arg)
       phase = changed ? blink != BLINK_OFF : !phase;
       sent_blink = blink;
       ticks = 0;
-      uint8_t b[8] = { seq_blink++ & 0x0F, blink, phase };
-      send_both(ID_BLINK, b);
+      uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink, phase };
+      send_both(CAN_ID_BLINK, b);
     }
   }
   return NULL;
@@ -241,17 +290,17 @@ static void *can_rx(void *arg)
       continue;
     int bus = addr.can_ifindex == ifindex[0] ? 0 : 1;
 
-    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3) {
-      int z = f.can_id - ID_HB_N2;
+    if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3) {
+      int z = f.can_id - CAN_ID_HB_N2;
       pthread_mutex_lock(&lock);
       last_hb_ms[z][bus] = now_ms();
       zone_fault[z] = f.data[1];
       pthread_mutex_unlock(&lock);
-    } else if (f.can_id == ID_FORCE) {
+    } else if (f.can_id == CAN_ID_FORCE) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
     }
 
-    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3 || f.can_id == ID_FAULT) {
+    if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
       pthread_mutex_lock(&lock);
       bool relay = split(now_ms());
       pthread_mutex_unlock(&lock);
@@ -283,7 +332,7 @@ int main()
   gpioSetSignalFunc(SIGINT, on_signal);
   gpioSetSignalFunc(SIGTERM, on_signal);
   const int outputs[] = { UDP_RX_GPIO, CMD_TX_GPIO, DEG_A_GPIO, DEG_B_GPIO, ERR_GPIO,
-                          can_tx_gpio[0], can_tx_gpio[1] };
+                          LEADER_GPIO, SYNC_GPIO, can_tx_gpio[0], can_tx_gpio[1] };
   for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++) {
     gpioSetMode(outputs[i], PI_OUTPUT);
     gpioWrite(outputs[i], PI_LOW);
@@ -315,6 +364,13 @@ int main()
   struct sched_param sp = { .sched_priority = 40 };
   if (sched_setscheduler(0, SCHED_FIFO, &sp) < 0)
     perror("SCHED_FIFO");
+
+  // One line with every Raft setting: at checkoff, proof all three nodes match
+  printf("N1 config: N=%d default_leader=%d seed=%d heartbeat_ms=%d append_ms=%d "
+         "missed_heartbeats=%d jitter_ms=%d log_size=%d debug=%d\n",
+         RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
+         RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
+  printf("N1 boot: term %d, leader %d\n", term, leader);
 
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&tid, NULL, can_rx, NULL);
@@ -367,10 +423,10 @@ int main()
     prev_test = test;
 
     int16_t s = atomic_exchange(&inject_bad, false) ? 1000 : steer;
-    uint8_t d[8] = { seq_ctrl++ & 0x0F, s & 0xFF, (uint16_t)s >> 8, throttle, brake,
+    uint8_t d[8] = { seq_ctrl++ & CAN_SEQ_MASK, s & 0xFF, (uint16_t)s >> 8, throttle, brake,
                      left | right << 1 | test << 2 };
     d[6] = crc8(d, 6);
-    send_both(ID_CTRL, d);
+    send_both(CAN_ID_CTRL, d);
     toggle(CMD_TX_GPIO);
   }
 

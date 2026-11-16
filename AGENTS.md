@@ -47,6 +47,15 @@ Logitech wheel --USB--> laptop --UDP:8000--> Raspberry Pi --UART--> STM32
 
 Hardware safety: check 5 V tolerance per pin (analog pins usually aren't), the Pi is 3.3 V only, never drive motors/servo from a GPIO, power the servo from the regulator, common ground everywhere.
 
+## Keep it simple
+
+Every teammate has to read, explain and debug this code at checkoff, so it must be easy to understand first and clever never.
+- Choose the simplest design that meets the requirement. Add generality, abstraction or optimization only when a requirement or a measurement needs it.
+- Prefer plain code: obvious names, short functions, one way of doing each thing, no macro tricks or deep indirection.
+- Write each fact once (one catalog, one constant, one threshold) and point to it rather than copying it.
+- Comments say why, briefly. If code needs a long explanation, simplify the code instead.
+- Efficient enough is enough: meet the timing requirements without micro-optimizing at the cost of clarity.
+
 ## AI-use policy
 
 The course allows AI to explain and review, not to do the design. The team must be able to explain every decision at checkoff. Prefer explaining and reviewing over writing complete controllers or wiring answers, unless explicitly asked for code.

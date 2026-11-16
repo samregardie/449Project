@@ -5,17 +5,7 @@
 
 #include <zephyr/drivers/can.h>
 
-/* Message catalog: standard IDs, DLC 8, every frame sent on both buses */
-#define CAN_ID_CTRL	0x010
-#define CAN_ID_FAULT	0x020
-#define CAN_ID_HB_N1	0x100
-#define CAN_ID_HB_N2	0x101
-#define CAN_ID_HB_N3	0x102
-#define CAN_ID_BLINK	0x200
-#define CAN_ID_FORCE	0x300
-
-/* Byte 0: seq in the low nibble (written by canbus_send), flags in the high */
-#define CAN_SEQ_MASK 0x0F
+#include "catalog.h"	/* CAN IDs, payload layouts, log entries */
 
 enum canbus_bus {
 	BUS_A,

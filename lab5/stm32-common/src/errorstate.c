@@ -25,10 +25,6 @@
 /* TODO (team): justify in the RTA */
 #define HB_PRIO K_PRIO_PREEMPT(3)
 
-/* FAULT reasons, same numbers as the Pi */
-#define FAULT_TEST_BUTTON 2
-#define FAULT_BAD_CTRL 3
-
 /* Own fault bits */
 #define OWN_TEST BIT(0)
 #define OWN_BAD_CTRL BIT(1)

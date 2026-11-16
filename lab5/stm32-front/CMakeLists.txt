@@ -5,6 +5,13 @@ project(stm32_front)
 # N2, the steering zone
 target_compile_definitions(app PRIVATE NODE_ID=2)
 
+# LEADER=random etc. for checkoff: west build-<front|rear> -p -- -DRAFT_DEFAULT_LEADER=0 (see raft_config.h)
+foreach(opt RAFT_DEFAULT_LEADER RAFT_SEED)
+	if(DEFINED ${opt})
+		target_compile_definitions(app PRIVATE ${opt}=${${opt}})
+	endif()
+endforeach()
+
 set(COMMON ${CMAKE_CURRENT_SOURCE_DIR}/../stm32-common)
 
 target_sources(app PRIVATE src/main.c src/servo.c ${COMMON}/src/canbus.c ${COMMON}/src/relay.c
