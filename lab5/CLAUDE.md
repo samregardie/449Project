@@ -37,8 +37,31 @@ The full table (IDs, senders, timing, byte layouts) lives once, in `stm32-common
 - Priority: CTRL (0x010) > REF_Nn (0x012–0x014) > REQ_VOTE/VOTE > FAULT > APPEND/ACK/CLIENT > HB > BLINK > FORCE. CTRL's 2 ms deadline wins; REF waits at most one frame (~270 µs), which bounds the extra sync error.
 - REF = term, a 1-byte cycle counter, 5-byte leader time in µs. A new leader continues the cycle counter from the last REF it heard. The seq nibble stays dedup-only.
 - APPEND carries one entry; entry 0 means none (the 100 ms keep-alive). When an ACK says a follower is behind, send the next APPEND right away, not on the next tick (checkoff 7 replay).
-- MEMBER (link/node changes) and EVENT are log entry kinds inside APPEND/CLIENT, not CAN IDs. The 1-byte entry encoding is still to be written down.
-- CLIENT = kind (request / redirect / ok), target node, entry or leader ID.
+- MEMBER (link/node changes) and EVENT are log entry kinds inside APPEND/CLIENT, not CAN IDs.
+- CLIENT = kind (request / redirect / ok), target node, entry or leader ID, request number.
+
+## Log entries (team design, decided)
+
+One byte, type in the high nibble and node ID in the low nibble (`0x63` = LINK_A_DOWN for N3); never 0. The table, `ENTRY()` helpers and `entry_valid()` are in `stm32-common/include/canbus.h`, copied in `receiver.c`. Bus A = the handout's CAN 1.
+
+Storage: two plain arrays, `uint8_t term[LOG_SIZE]` and `uint8_t entry[LOG_SIZE]`; the index is the array position. 30,000 × 2 B = 60 KB, which fits next to the ~17 KB the apps use now. A struct with a stored `uint16_t` index pads to 6 B per entry (180 KB) and does not fit.
+
+Rules:
+1. **No-op requests are ignored.** The leader appends only if the entry changes the state (a link already down stays one entry). Several nodes reporting the same failure, and retries after a redirect, give one entry.
+2. **Whose link failed.** A node that hears no one on a bus reports its own link down. A node that hears the others on a bus but not node X reports X's link down.
+3. **NODE_DOWN N1 vs COCKPIT_ERROR.** NODE_DOWN N1 = the Pi is unreachable. COCKPIT_ERROR = failure mode, which includes a lost wheel link while the Pi is up. Pi down appends both.
+4. **NODE_UP is followed by its links.** `addNode` brings a node back with no links, so the leader also appends LINK_A_UP / LINK_B_UP for each link that works.
+5. **CLIENT request numbers.** A client counts up once per new request and repeats the number on a retry; the leader remembers the last number it accepted per node and drops repeats. This is what keeps EVENTs exactly-once.
+6. **Reject malformed entries** with `entry_valid()`: types 0 and 0xA–0xF, node IDs outside 1–3, or a node ID on COCKPIT_*.
+7. **Log full** (30,000 entries): <team to decide: stop and go to error, or wrap>.
+8. **Wait after boot before voting.** The log, term and vote are in RAM, so a rebooted node waits one election timeout (hears REF, learns the term) before granting any vote, so it can't vote twice in one term.
+
+Console lines, the same format on every node, printed from a thread (never the CAN RX path):
+```
+[N2] COMMIT idx=12 term=1 LINK_A_DOWN node=3 (0x63)
+[N2] NET N1=up(A,B) N2=up(A,B) N3=up(-,B)
+[N2] RAFT ...        (Debug only: election and append messages)
+```
 - BLINK is state only, sent on change and every 100 ms; timing comes from global time.
 - With 4 nodes (n = 4), every per-node block still fits (the base IDs 0x018, 0x01C, 0x044, 0x048 are unused) except VOTE_N4 = 0x020, which collides with FAULT.
 

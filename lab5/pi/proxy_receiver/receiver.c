@@ -64,6 +64,38 @@ static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 #define ID_FORCE 0x300
 
 enum { CLIENT_REQUEST, CLIENT_REDIRECT, CLIENT_OK }; // CLIENT byte 1
+
+// Log entry byte, same as canbus.h: type << 4 | node ID (0x63 = LINK_A_DOWN for N3)
+enum {
+  ENTRY_NONE, // no entry (empty APPEND)
+  ENTRY_COCKPIT_OK,
+  ENTRY_COCKPIT_ERROR,
+  ENTRY_NODE_UP,
+  ENTRY_NODE_DOWN,
+  ENTRY_LINK_A_UP,
+  ENTRY_LINK_A_DOWN,
+  ENTRY_LINK_B_UP,
+  ENTRY_LINK_B_DOWN,
+  ENTRY_EVENT,
+};
+
+#define NODE_COUNT 3 // node IDs are 1..NODE_COUNT
+
+#define ENTRY(type, node) (((type) << 4) | (node))
+#define ENTRY_TYPE(e) ((e) >> 4)
+#define ENTRY_NODE(e) ((e) & 0x0F)
+
+// Reject anything else as malformed: unknown type, or a bad node ID
+static inline bool entry_valid(uint8_t e) {
+  uint8_t type = ENTRY_TYPE(e);
+  uint8_t node = ENTRY_NODE(e);
+
+  if (type == ENTRY_COCKPIT_OK || type == ENTRY_COCKPIT_ERROR) {
+    return node == 0;
+  }
+
+  return type >= ENTRY_NODE_UP && type <= ENTRY_EVENT && node >= 1 && node <= NODE_COUNT;
+}
 enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
 enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
 

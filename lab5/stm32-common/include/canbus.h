@@ -1,6 +1,7 @@
 #ifndef CANBUS_H
 #define CANBUS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <zephyr/drivers/can.h>
@@ -32,14 +33,17 @@
  * 0x044+n    APPEND_ACK_Nn  follower   reply to APPEND            term, success (0/1),
  *                                                                 match index (2)
  * 0x048+n    CLIENT_Nn      any node   topology change or event   kind (CLIENT_*), target node ID,
- *                                                                 entry (REQUEST) or leader ID (REDIRECT)
+ *                                                                 entry (REQUEST) or leader ID (REDIRECT),
+ *                                                                 request number
  * 0x100+n-1  HB_Nn          each node  20 ms                      own fault (0/1),
  *                                                                 bus health (bit0 = A ok, bit1 = B ok)
  * 0x200      BLINK          N1         on change + every 100 ms   state (off/left/right/hazard)
  * 0x300      FORCE          N2         50 ms                      int8
  *
- * An APPEND with entry 0 carries no entry (the 100 ms keep-alive), so no
- * log entry type may encode to 0.
+ * An APPEND with entry 0 (ENTRY_NONE) carries no entry: the 100 ms keep-alive.
+ * CLIENT request number: the sender counts up once per new request and
+ * repeats the number on a retry, so the leader can drop the repeat.
+ * Bus A is the handout's CAN 1, bus B is CAN 2.
  * BLINK byte 2 (phase) is the Lab 3 timing; it goes away once the blinkers
  * run on global time.
  */
@@ -63,6 +67,53 @@ enum client_kind {
 	CLIENT_REDIRECT,	/* follower -> client: send it to the leader instead */
 	CLIENT_OK,		/* leader -> client: the entry is committed */
 };
+
+/*
+ * Log entry: one byte, type in the high nibble, node ID in the low nibble,
+ * so it reads straight off candump (0x63 = LINK_A_DOWN for N3).
+ * Never 0, because every type is 1 or more. The Pi's receiver.c has the same values.
+ *
+ *   0x10 COCKPIT_OK        vehicle leaves failure mode
+ *   0x20 COCKPIT_ERROR     vehicle enters failure mode (Pi down or wheel link lost)
+ *   0x3n NODE_UP n         addNode(n); its LINK_*_UP entries follow separately
+ *   0x4n NODE_DOWN n       dropNode(n), which also drops its links
+ *   0x5n LINK_A_UP n       addLink(n, A)
+ *   0x6n LINK_A_DOWN n     dropLink(n, A)
+ *   0x7n LINK_B_UP n       addLink(n, B)
+ *   0x8n LINK_B_DOWN n     dropLink(n, B)
+ *   0x9n EVENT from n
+ */
+enum entry_type {
+	ENTRY_NONE,		/* no entry (empty APPEND) */
+	ENTRY_COCKPIT_OK,
+	ENTRY_COCKPIT_ERROR,
+	ENTRY_NODE_UP,
+	ENTRY_NODE_DOWN,
+	ENTRY_LINK_A_UP,
+	ENTRY_LINK_A_DOWN,
+	ENTRY_LINK_B_UP,
+	ENTRY_LINK_B_DOWN,
+	ENTRY_EVENT,
+};
+
+#define NODE_COUNT 3	/* node IDs are 1..NODE_COUNT */
+
+#define ENTRY(type, node)	(((type) << 4) | (node))
+#define ENTRY_TYPE(e)		((e) >> 4)
+#define ENTRY_NODE(e)		((e) & 0x0F)
+
+/* Reject anything else as malformed: unknown type, or a bad node ID */
+static inline bool entry_valid(uint8_t e)
+{
+	uint8_t type = ENTRY_TYPE(e);
+	uint8_t node = ENTRY_NODE(e);
+
+	if (type == ENTRY_COCKPIT_OK || type == ENTRY_COCKPIT_ERROR) {
+		return node == 0;
+	}
+
+	return type >= ENTRY_NODE_UP && type <= ENTRY_EVENT && node >= 1 && node <= NODE_COUNT;
+}
 
 /* Byte 0: seq in the low nibble (written by canbus_send), flags in the high */
 #define CAN_SEQ_MASK 0x0F
