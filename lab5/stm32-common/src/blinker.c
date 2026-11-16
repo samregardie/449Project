@@ -5,9 +5,6 @@
 #include "canbus.h"
 #include "errorstate.h"
 
-/* BLINK byte 1, same as the Pi */
-enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
-
 /* Own hazards with no cockpit: 1 Hz, same as the cockpit's */
 #define LOCAL_HALF_PERIOD_MS 500
 

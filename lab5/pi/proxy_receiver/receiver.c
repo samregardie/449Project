@@ -1,11 +1,10 @@
 /*
  * N1 cockpit: wheel state over UDP in, CAN out on canA and canB.
  *
- * The message catalog (IDs, senders, timing, payload layouts) is written out
- * once, in lab5/stm32-common/include/canbus.h. Keep the IDs below in step with it.
- * Notes for the Pi: CTRL steer is -100..100, throttle and brake 0..100. N1's
- * HB fault is the test button or a lost wheel link. BLINK byte 2 (phase) is
- * the Lab 3 timing and goes away once the blinkers run on global time.
+ * The message catalog and log entries are in lab5/stm32-common/include/catalog.h
+ * and the Raft config in raft_config.h, both shared with the STM32s (build.sh
+ * adds that folder to the include path). N1's HB fault is the test button or a
+ * lost wheel link.
  */
 
 #include <stdio.h>
@@ -27,6 +26,8 @@
 #include <pigpio.h>
 
 #include "state.h"
+#include "catalog.h"     // CAN IDs, payload layouts, log entries (shared with the STM32s)
+#include "raft_config.h" // Raft config (shared with the STM32s)
 
 /** Configure this **/
 //#define LOCAL_HOST "172.26.166.54" // IP of local interface
@@ -47,57 +48,6 @@
 #define DEG_B_GPIO 19
 #define ERR_GPIO 26
 static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
-
-// CAN IDs: same as lab5/stm32-common/include/canbus.h. n = node ID (1 = N1, 2 = N2, 3 = N3)
-#define ID_CTRL 0x010
-#define ID_REF(n) (0x011 + (n))
-#define ID_REQ_VOTE(n) (0x018 + (n))
-#define ID_VOTE(n) (0x01C + (n))
-#define ID_FAULT 0x020
-#define ID_APPEND(n) (0x040 + (n))
-#define ID_APPEND_ACK(n) (0x044 + (n))
-#define ID_CLIENT(n) (0x048 + (n))
-#define ID_HB_N1 0x100
-#define ID_HB_N2 0x101
-#define ID_HB_N3 0x102
-#define ID_BLINK 0x200
-#define ID_FORCE 0x300
-
-enum { CLIENT_REQUEST, CLIENT_REDIRECT, CLIENT_OK }; // CLIENT byte 1
-
-// Log entry byte, same as canbus.h: type << 4 | node ID (0x63 = LINK_A_DOWN for N3)
-enum {
-  ENTRY_NONE, // no entry (empty APPEND)
-  ENTRY_COCKPIT_OK,
-  ENTRY_COCKPIT_ERROR,
-  ENTRY_NODE_UP,
-  ENTRY_NODE_DOWN,
-  ENTRY_LINK_A_UP,
-  ENTRY_LINK_A_DOWN,
-  ENTRY_LINK_B_UP,
-  ENTRY_LINK_B_DOWN,
-  ENTRY_EVENT,
-};
-
-#define NODE_COUNT 3 // node IDs are 1..NODE_COUNT
-
-#define ENTRY(type, node) (((type) << 4) | (node))
-#define ENTRY_TYPE(e) ((e) >> 4)
-#define ENTRY_NODE(e) ((e) & 0x0F)
-
-// Reject anything else as malformed: unknown type, or a bad node ID
-static inline bool entry_valid(uint8_t e) {
-  uint8_t type = ENTRY_TYPE(e);
-  uint8_t node = ENTRY_NODE(e);
-
-  if (type == ENTRY_COCKPIT_OK || type == ENTRY_COCKPIT_ERROR) {
-    return node == 0;
-  }
-
-  return type >= ENTRY_NODE_UP && type <= ENTRY_EVENT && node >= 1 && node <= NODE_COUNT;
-}
-enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
-enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
 
 #define TICK_MS 20
 #define BLINK_TICKS 25    // toggle every 500 ms = 1 Hz
@@ -221,20 +171,20 @@ static void *tick(void *arg)
              error ? "ERROR" : "OK", test, other_fault, failed[0], failed[1], (long long)udp_age);
     was_error = error;
 
-    uint8_t hb[8] = { seq_hb++ & 0x0F, own_fault, bus_ok[0] | bus_ok[1] << 1 };
-    send_both(ID_HB_N1, hb);
+    uint8_t hb[8] = { seq_hb++ & CAN_SEQ_MASK, own_fault, bus_ok[0] | bus_ok[1] << 1 };
+    send_both(CAN_ID_HB_N1, hb);
 
     // FAULT once, when a zone is lost or the test button is pressed
     for (int z = 0; z < 2; z++) {
       if (failed[z] && !was_failed[z]) {
-        uint8_t f[8] = { seq_fault++ & 0x0F, z + 2, FAULT_HB_LOST };
-        send_both(ID_FAULT, f);
+        uint8_t f[8] = { seq_fault++ & CAN_SEQ_MASK, z + 2, FAULT_HB_LOST };
+        send_both(CAN_ID_FAULT, f);
       }
       was_failed[z] = failed[z];
     }
     if (test && !was_test) {
-      uint8_t f[8] = { seq_fault++ & 0x0F, 1, FAULT_TEST_BUTTON };
-      send_both(ID_FAULT, f);
+      uint8_t f[8] = { seq_fault++ & CAN_SEQ_MASK, 1, FAULT_TEST_BUTTON };
+      send_both(CAN_ID_FAULT, f);
     }
     was_test = test;
 
@@ -244,8 +194,8 @@ static void *tick(void *arg)
       phase = changed ? blink != BLINK_OFF : !phase;
       sent_blink = blink;
       ticks = 0;
-      uint8_t b[8] = { seq_blink++ & 0x0F, blink, phase };
-      send_both(ID_BLINK, b);
+      uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink, phase };
+      send_both(CAN_ID_BLINK, b);
     }
   }
   return NULL;
@@ -279,17 +229,17 @@ static void *can_rx(void *arg)
       continue;
     int bus = addr.can_ifindex == ifindex[0] ? 0 : 1;
 
-    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3) {
-      int z = f.can_id - ID_HB_N2;
+    if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3) {
+      int z = f.can_id - CAN_ID_HB_N2;
       pthread_mutex_lock(&lock);
       last_hb_ms[z][bus] = now_ms();
       zone_fault[z] = f.data[1];
       pthread_mutex_unlock(&lock);
-    } else if (f.can_id == ID_FORCE) {
+    } else if (f.can_id == CAN_ID_FORCE) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
     }
 
-    if (f.can_id == ID_HB_N2 || f.can_id == ID_HB_N3 || f.can_id == ID_FAULT) {
+    if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
       pthread_mutex_lock(&lock);
       bool relay = split(now_ms());
       pthread_mutex_unlock(&lock);
@@ -405,10 +355,10 @@ int main()
     prev_test = test;
 
     int16_t s = atomic_exchange(&inject_bad, false) ? 1000 : steer;
-    uint8_t d[8] = { seq_ctrl++ & 0x0F, s & 0xFF, (uint16_t)s >> 8, throttle, brake,
+    uint8_t d[8] = { seq_ctrl++ & CAN_SEQ_MASK, s & 0xFF, (uint16_t)s >> 8, throttle, brake,
                      left | right << 1 | test << 2 };
     d[6] = crc8(d, 6);
-    send_both(ID_CTRL, d);
+    send_both(CAN_ID_CTRL, d);
     toggle(CMD_TX_GPIO);
   }
 

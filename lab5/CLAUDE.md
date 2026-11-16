@@ -8,8 +8,9 @@ Lab 5: Time Synchronization and Consensus (due 2026-11-18, 11:59pm). The spec is
 
 ```
 lab5/
-  pi/proxy_receiver/   N1 cockpit (C, pigpio, SocketCAN on canA/canB). Payload layouts are in the receiver.c header comment.
+  pi/proxy_receiver/   N1 cockpit (C, pigpio, SocketCAN on canA/canB). build.sh includes ../../stm32-common/include for the shared headers.
   stm32-common/        Not an app. .c/.h shared by both STM32 nodes; each node's CMakeLists.txt adds them.
+                       include/catalog.h and include/raft_config.h are plain C, shared by all three nodes (the Pi too).
   stm32-front/         N2 steering app (NODE_ID=2): servo
   stm32-rear/          N3 drivetrain app (NODE_ID=3): drive (PI loop), motor, encoder
   pins.md              Every pin assignment for all three nodes; keep in sync with the overlays
@@ -32,7 +33,7 @@ All three nodes (cockpit N1, steering N2, drivetrain N3) run Raft. The log holds
 
 ## Message catalog (team design, decided)
 
-The full table (IDs, senders, timing, byte layouts) lives once, in `stm32-common/include/canbus.h`; `pi/proxy_receiver/receiver.c` has the same IDs. Change both together. The key choices:
+The full table (IDs, senders, timing, byte layouts, FAULT/BLINK/CLIENT values) lives once, in `stm32-common/include/catalog.h`, which the STM32s (through `canbus.h`) and the Pi both include. The key choices:
 - Every message more than one node can send has one ID per node, `base + n` with n = node ID 1–3. That includes REF and APPEND: during a handover two nodes can both think they lead, and a shared ID would collide on the bus and break the `(ID, seq)` dedup.
 - Priority: CTRL (0x010) > REF_Nn (0x012–0x014) > REQ_VOTE/VOTE > FAULT > APPEND/ACK/CLIENT > HB > BLINK > FORCE. CTRL's 2 ms deadline wins; REF waits at most one frame (~270 µs), which bounds the extra sync error.
 - REF = term, a 1-byte cycle counter, 5-byte leader time in µs. A new leader continues the cycle counter from the last REF it heard. The seq nibble stays dedup-only.
@@ -40,9 +41,16 @@ The full table (IDs, senders, timing, byte layouts) lives once, in `stm32-common
 - MEMBER (link/node changes) and EVENT are log entry kinds inside APPEND/CLIENT, not CAN IDs.
 - CLIENT = kind (request / redirect / ok), target node, entry or leader ID, request number.
 
+## Raft config (Part 2)
+
+`stm32-common/include/raft_config.h`, one file for all three nodes: node IDs (`NODE_COCKPIT` 1, `NODE_STEERING` 2, `NODE_DRIVE` 3), `RAFT_N`, `RAFT_DEFAULT_LEADER` (`RAFT_NO_LEADER` = 0 for LEADER=random), `RAFT_SEED`, heartbeat 20 ms, 3 missed heartbeats, jitter 39 ms, log size 30,000, `RAFT_DEBUG`. `_Static_assert`s catch bad values at build time.
+- Each node seeds its jitter with `RAFT_SEED + node ID`: same seed everywhere would give identical timeouts and endless split votes.
+- Only `RAFT_DEFAULT_LEADER` and `RAFT_SEED` can be overridden, and must be on all three nodes: `west build-front -p -- -DRAFT_DEFAULT_LEADER=0`, same for rear, and `RAFT_DEFAULT_LEADER=0 sudo -E ./run.sh` on the Pi. Go back with `-p` and no `-D`.
+- Still to do with the Raft agent: print all config values in one line at boot (proof at checkoff that all three match).
+
 ## Log entries (team design, decided)
 
-One byte, type in the high nibble and node ID in the low nibble (`0x63` = LINK_A_DOWN for N3); never 0. The table, `ENTRY()` helpers and `entry_valid()` are in `stm32-common/include/canbus.h`, copied in `receiver.c`. Bus A = the handout's CAN 1.
+One byte, type in the high nibble and node ID in the low nibble (`0x63` = LINK_A_DOWN for N3); never 0. The table, `ENTRY()` helpers and `entry_valid()` are in `stm32-common/include/catalog.h`. Bus A = the handout's CAN 1.
 
 Storage: two plain arrays, `uint8_t term[LOG_SIZE]` and `uint8_t entry[LOG_SIZE]`; the index is the array position. 30,000 × 2 B = 60 KB, which fits next to the ~17 KB the apps use now. A struct with a stored `uint16_t` index pads to 6 B per entry (180 KB) and does not fit.
 
