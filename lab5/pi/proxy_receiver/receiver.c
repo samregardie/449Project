@@ -1,13 +1,11 @@
 /*
  * N1 cockpit: wheel state over UDP in, CAN out on canA and canB.
  *
- * Payloads (byte 0 = seq in the low nibble):
- *   CTRL   steer int16 LE (-100..100), throttle, brake (0..100), buttons, CRC-8 of bytes 0-5
- *   HB     own fault (0/1), bus health (bit0 = A ok, bit1 = B ok). N1's own
- *          fault is the test button or a lost wheel link.
- *   BLINK  state (off/left/right/hazard), phase (1 = lamps on)
- *   FAULT  zone, reason
- *   FORCE  int8
+ * The message catalog (IDs, senders, timing, payload layouts) is written out
+ * once, in lab5/stm32-common/include/canbus.h. Keep the IDs below in step with it.
+ * Notes for the Pi: CTRL steer is -100..100, throttle and brake 0..100. N1's
+ * HB fault is the test button or a lost wheel link. BLINK byte 2 (phase) is
+ * the Lab 3 timing and goes away once the blinkers run on global time.
  */
 
 #include <stdio.h>
@@ -50,14 +48,22 @@
 #define ERR_GPIO 26
 static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
+// CAN IDs: same as lab5/stm32-common/include/canbus.h. n = node ID (1 = N1, 2 = N2, 3 = N3)
 #define ID_CTRL 0x010
+#define ID_REF(n) (0x011 + (n))
+#define ID_REQ_VOTE(n) (0x018 + (n))
+#define ID_VOTE(n) (0x01C + (n))
 #define ID_FAULT 0x020
+#define ID_APPEND(n) (0x040 + (n))
+#define ID_APPEND_ACK(n) (0x044 + (n))
+#define ID_CLIENT(n) (0x048 + (n))
 #define ID_HB_N1 0x100
 #define ID_HB_N2 0x101
 #define ID_HB_N3 0x102
 #define ID_BLINK 0x200
 #define ID_FORCE 0x300
 
+enum { CLIENT_REQUEST, CLIENT_REDIRECT, CLIENT_OK }; // CLIENT byte 1
 enum { BLINK_OFF, BLINK_LEFT, BLINK_RIGHT, BLINK_HAZARD };
 enum { FAULT_HB_LOST = 1, FAULT_TEST_BUTTON = 2 };
 

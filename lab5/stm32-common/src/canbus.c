@@ -18,8 +18,14 @@
 #define DEDUP_RESET_MS 100
 
 #define RX_QUEUE_LEN 32		/* ~4 frames per 20 ms per bus */
-#define MAX_HANDLERS 8		/* IDs this node receives */
-#define MAX_TX_IDS 4		/* IDs this node sends */
+/*
+ * Sized for the Lab 5 catalog: a node receives up to ~20 IDs and sends ~9.
+ * Too small fails quietly (canbus_on() returns -ENOMEM; next_seq() returns 0),
+ * so keep headroom. Each received ID also takes one MCP2515 filter per bus:
+ * keep CONFIG_CAN_MCP2515_MAX_FILTERS in prj.conf >= MAX_HANDLERS.
+ */
+#define MAX_HANDLERS 24		/* IDs this node receives */
+#define MAX_TX_IDS 12		/* IDs this node sends */
 
 /* Wait for a free TX buffer: a few frame times (270 us each) of normal traffic */
 #define TX_WAIT K_MSEC(2)

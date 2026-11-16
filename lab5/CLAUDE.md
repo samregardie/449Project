@@ -30,7 +30,17 @@ All three nodes (cockpit N1, steering N2, drivetrain N3) run Raft. The log holds
 - **Time sync (Part 6):** the leader's heartbeat (REF) carries its clock. Follower clock = L₁ + network delay (CAN properties, TTCAN-style, not a round trip); set it with `clock_settime()`. Drift ratio = (L₂−L₁)/(F₂−F₁), applied between syncs. Provide `global_gettime()`, a periodic task printing the drift correction, and a PPS GPIO (rising edge every whole global second) that prints global time, local time, drift ratio and correction since the last heartbeat. Blinkers run off global time so front and rear line up.
 - **Failure behavior:** node down → election, the new leader takes over REF, failure mode with hazards in step. CAN link down → no election; nodes stay reachable by relaying.
 
-Message names the checkoff uses: REF (20 ms, cycle counter + master time), APPEND (every 100 ms, empty when idle), REQ_VOTE, MEMBER (one per link/node change), EVENT. IDs and payloads are the team's design; record them here and in `pi/proxy_receiver/receiver.c` once chosen.
+## Message catalog (team design, decided)
+
+The full table (IDs, senders, timing, byte layouts) lives once, in `stm32-common/include/canbus.h`; `pi/proxy_receiver/receiver.c` has the same IDs. Change both together. The key choices:
+- Every message more than one node can send has one ID per node, `base + n` with n = node ID 1–3. That includes REF and APPEND: during a handover two nodes can both think they lead, and a shared ID would collide on the bus and break the `(ID, seq)` dedup.
+- Priority: CTRL (0x010) > REF_Nn (0x012–0x014) > REQ_VOTE/VOTE > FAULT > APPEND/ACK/CLIENT > HB > BLINK > FORCE. CTRL's 2 ms deadline wins; REF waits at most one frame (~270 µs), which bounds the extra sync error.
+- REF = term, a 1-byte cycle counter, 5-byte leader time in µs. A new leader continues the cycle counter from the last REF it heard. The seq nibble stays dedup-only.
+- APPEND carries one entry; entry 0 means none (the 100 ms keep-alive). When an ACK says a follower is behind, send the next APPEND right away, not on the next tick (checkoff 7 replay).
+- MEMBER (link/node changes) and EVENT are log entry kinds inside APPEND/CLIENT, not CAN IDs. The 1-byte entry encoding is still to be written down.
+- CLIENT = kind (request / redirect / ok), target node, entry or leader ID.
+- BLINK is state only, sent on change and every 100 ms; timing comes from global time.
+- With 4 nodes (n = 4), every per-node block still fits (the base IDs 0x018, 0x01C, 0x044, 0x048 are unused) except VOTE_N4 = 0x020, which collides with FAULT.
 
 New signals the checkoff scopes or looks at: LEADER LED, SYNC LED, REF_RX toggle, PPS, HZ, plus FL/RL as before. Add each to `pins.md` and the overlays.
 
