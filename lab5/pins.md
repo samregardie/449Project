@@ -84,6 +84,8 @@ EXTI lines in use: CAN 10, 8; encoders 9, 0, 1, 4; button 13. Every interrupt pi
 | DEG_A LED | - | GPIO13 (33) |
 | DEG_B LED | - | GPIO19 (35) |
 | ERR | - | GPIO26 (37) |
+| LEADER LED (Lab 5) | - | GPIO16 (36) |
+| SYNC LED (Lab 5) | - | GPIO20 (38) |
 | UART to STM32 | serial0 / ttyAMA5 | removed (CAN instead) |
 | SPI SCK / MOSI / MISO | - | GPIO11 (23) / GPIO10 (19) / GPIO9 (21) |
 | CS bus A / B | - | CE0 = GPIO8 (24) / CE1 = GPIO7 (26) |

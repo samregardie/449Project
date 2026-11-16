@@ -4,7 +4,7 @@ Lab 5: Time Synchronization and Consensus (due 2026-11-18, 11:59pm). The spec is
 
 ## Current state of this folder
 
-`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`); none of the Lab 5 work is in yet. A few comments and `pins.md` still say "Lab 3" or mention `stm32-can-test`, which was removed.
+`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`). Lab 5 so far: the Pi is the fixed leader (step 1). In `tick()` it sends REF every 20 ms and an empty APPEND every 100 ms, drives LEADER (GPIO16) and SYNC (GPIO20), has `global_gettime()` (monotonic + offset, 0 while it leads) and prints its config at boot. No log, elections or STM32 Raft code yet. A few comments and `pins.md` still say "Lab 3" or mention `stm32-can-test`, which was removed.
 
 ```
 lab5/

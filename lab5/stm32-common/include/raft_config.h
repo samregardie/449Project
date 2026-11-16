@@ -36,6 +36,7 @@
 #endif
 
 #define RAFT_HEARTBEAT_MS		20	/* REF period, also the clock-sync period */
+#define RAFT_APPEND_MS			100	/* APPEND period when there is no new entry */
 #define RAFT_MISSED_HEARTBEATS		3
 #define RAFT_ELECTION_JITTER_MS		39	/* timeout = 3 x 20 + U(0, 39) ms */
 #define RAFT_ELECTION_TIMEOUT_MIN_MS	(RAFT_MISSED_HEARTBEATS * RAFT_HEARTBEAT_MS)
@@ -51,6 +52,8 @@ _Static_assert(RAFT_LOG_SIZE <= 65535, "log index is 2 bytes in APPEND");
 _Static_assert(RAFT_N <= 15, "node ID is 4 bits in a log entry");
 _Static_assert(RAFT_DEFAULT_LEADER >= 0 && RAFT_DEFAULT_LEADER <= RAFT_N,
 	       "default leader must be a node ID or RAFT_NO_LEADER");
+_Static_assert(RAFT_APPEND_MS % RAFT_HEARTBEAT_MS == 0,
+	       "APPEND goes out on every Nth REF tick");
 _Static_assert(RAFT_ELECTION_TIMEOUT_MIN_MS > RAFT_HEARTBEAT_MS,
 	       "election timeout must be longer than the heartbeat period");
 
