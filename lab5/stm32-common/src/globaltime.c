@@ -4,9 +4,11 @@
  * At each REF:   clock_settime(L + REF_DELAY_US)
  * Between REFs:  global = clock + drift correction for the time since then
  * Drift ratio = leader time elapsed / local time elapsed, over ~1 s windows
- * (one 20 ms interval is too short: timestamp jitter would swamp it).
+ * (one 20 ms interval is too short: timestamp jitter would swamp it). The
+ * ratio starts at 1 and is only replaced by a window that looks plausible.
  */
 
+#include <stdlib.h>
 #include <time.h>
 
 #include <zephyr/kernel.h>
@@ -25,6 +27,13 @@
 #define REF_DELAY_US 270
 
 #define DRIFT_WINDOW_US 1000000
+
+/*
+ * Crystals differ by about 100 ppm at most. A window that measures more
+ * than this can only mean a REF arrived late (busy bus), so it is ignored
+ * and the previous ratio stays.
+ */
+#define DRIFT_MAX_PPM 500
 #define SYNC_LOST_MS (RAFT_MISSED_HEARTBEATS * RAFT_HEARTBEAT_MS)
 #define PPS_HIGH_MS 100
 
@@ -44,8 +53,8 @@ static uint16_t ref_id;			/* which leader's REF we follow */
 static int64_t set_at;			/* clock value at the last REF */
 static int64_t step_us;			/* how far the last REF moved the clock */
 static int64_t win_leader, win_local;	/* start of the current drift window */
-static int64_t leader_span = 1;		/* last full window: ratio = leader_span */
-static int64_t local_span = 1;		/*                          / local_span */
+static int64_t leader_span = 1;		/* last accepted window: ratio = leader_span */
+static int64_t local_span = 1;		/*                              / local_span */
 
 /* Local clock in us, never stepped */
 static int64_t local_us(void)
@@ -110,27 +119,35 @@ static void on_ref(const struct can_frame *f)
 		leader |= (int64_t)f->data[3 + i] << (8 * i);
 	}
 
-	int64_t now = leader + REF_DELAY_US;
-	struct timespec ts = { .tv_sec = now / USEC_PER_SEC,
-			       .tv_nsec = (now % USEC_PER_SEC) * NSEC_PER_USEC };
+	int64_t now = leader + REF_DELAY_US;	/* global time at `local` */
 
 	K_SPINLOCK(&lock) {
+		/* The clock is set a little after `local`: add the time since then */
+		int64_t target = now + (local_us() - local);
+		struct timespec ts = { .tv_sec = target / USEC_PER_SEC,
+				       .tv_nsec = (target % USEC_PER_SEC) * NSEC_PER_USEC };
+
 		if (!synced || f->id != ref_id) {
-			/* First REF, after a loss, or a new leader: new window, ratio 1 */
+			/* First REF, after a loss, or a new leader: start a new window,
+			 * and keep using the last ratio until it closes */
 			ref_id = f->id;
 			win_leader = now;
 			win_local = local;
-			leader_span = local_span = 1;
 		} else if (local - win_local >= DRIFT_WINDOW_US) {
-			leader_span = now - win_leader;
-			local_span = local - win_local;
+			int64_t leader_el = now - win_leader;
+			int64_t local_el = local - win_local;
+
+			if (llabs(leader_el - local_el) * 1000000 <= DRIFT_MAX_PPM * local_el) {
+				leader_span = leader_el;
+				local_span = local_el;
+			}
 			win_leader = now;
 			win_local = local;
 		}
 
-		step_us = now - global_locked();
+		step_us = target - global_locked();
 		sys_clock_settime(SYS_CLOCK_REALTIME, &ts);
-		set_at = now;
+		set_at = target;
 		synced = true;
 	}
 

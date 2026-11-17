@@ -87,7 +87,10 @@ static uint8_t cycle;                    // REF cycle counter; a new leader cont
 // Leader's view of each follower, under `lock` (with the log). Zone 0 is N2, 1 is N3.
 static uint16_t next_index[2] = { 1, 1 }; // next entry to send it
 static uint16_t match_index[2];           // last entry it confirmed
-static uint8_t last_ack_seq[2] = { 0xFF, 0xFF }; // ACKs arrive on both buses: act on one copy
+// ACKs arrive on both buses: act on one copy. (A follower that reboots starts
+// its seq at 0 again; if that equals the last one, one ACK is skipped and the
+// next APPEND, at most 100 ms later, gets a fresh one.)
+static uint8_t last_ack_seq[2] = { 0xFF, 0xFF };
 static uint8_t seq_append;
 static bool log_full; // rule 7: the log refused an entry, so we stay in error
 
