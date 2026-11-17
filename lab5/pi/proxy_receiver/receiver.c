@@ -235,10 +235,14 @@ static void advance_commit_locked(void)
 }
 
 // APPEND_ACK (catalog.h): seq, term, success (0/1), match index (2).
-// Success: the follower has everything up to `match`. Failure: its log didn't
-// fit at prev, and `match` is its last index after dropping what conflicted,
-// so we resend from there. A follower that rebooted (RAM log) reports 0 and
-// gets the whole log again.
+// Success: the follower has everything up to `match`. Only ever raise
+// match_index on success: every follower ACKs every APPEND, so an up-to-date
+// follower ACKs the old entries we resend for a lagging one, with a low
+// `match`. Taking that at face value made it look behind too, and each ACK
+// triggered another APPEND (a flood).
+// Failure: its log didn't fit at prev, and `match` is its last index after
+// dropping what conflicted, so we resend from there. A follower that rebooted
+// (RAM log) reports 0 and gets the whole log again.
 static void on_append_ack(int z, const uint8_t d[8])
 {
   uint8_t seq = d[0] & CAN_SEQ_MASK;
@@ -249,11 +253,15 @@ static void on_append_ack(int z, const uint8_t d[8])
     last_ack_seq[z] = seq;
     if (match > log_last_index())
       match = log_last_index();
-    if (d[2])
-      match_index[z] = match;
-    else if (match < match_index[z])
-      match_index[z] = match; // it lost entries (reboot): stop counting them
-    next_index[z] = match + 1;
+    if (d[2]) {
+      if (match > match_index[z])
+        match_index[z] = match;
+      next_index[z] = match_index[z] + 1;
+    } else {
+      if (match < match_index[z])
+        match_index[z] = match; // it lost entries (reboot): stop counting them
+      next_index[z] = match + 1;
+    }
 
     advance_commit_locked();
     if (next_index[z] <= log_last_index())
