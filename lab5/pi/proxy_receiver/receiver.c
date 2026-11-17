@@ -193,21 +193,30 @@ static bool follower_alive(int z, int64_t now)
   return now - last_hb_ms[z][0] <= HB_TIMEOUT_MS || now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
 }
 
-// APPEND (catalog.h): seq, term, prev index (2), prev term, entry term, commit distance, entry.
-// APPEND is one broadcast frame, so it carries the next entry for the follower
-// furthest behind. Followers we can't hear are skipped, or one unplugged node
-// would hold everyone back. When everyone is up to date the "next entry" is
-// past the end of the log: entry 0, the keep-alive. Under `lock`.
-static void send_append_locked(void)
+// The index the next APPEND is about. APPEND is one broadcast frame, so it
+// carries the next entry for the follower furthest behind. Followers we can't
+// hear are skipped, or one unplugged node would hold everyone back. When
+// everyone is up to date it is past the end of the log: entry 0, the
+// keep-alive. *behind = that follower's zone, -1 if none. Under `lock`.
+static uint16_t next_to_send_locked(int *behind)
 {
   int64_t now = now_ms();
   uint16_t n = log_last_index() + 1;
-  int behind = -1; // zone of the follower we send for, -1 = nobody behind
+  *behind = -1;
   for (int z = 0; z < 2; z++)
     if (follower_alive(z, now) && next_index[z] < n) {
       n = next_index[z];
-      behind = z;
+      *behind = z;
     }
+  return n;
+}
+
+// APPEND (catalog.h): seq, term, prev index (2), prev term, entry term, commit distance, entry.
+// Under `lock`.
+static void send_append_locked(void)
+{
+  int behind;
+  uint16_t n = next_to_send_locked(&behind);
 
   uint16_t prev = n - 1, commit = log_commit_index();
   int distance = n - commit; // commit <= last < n on a keep-alive, so this is >= 1 there
@@ -233,22 +242,23 @@ static void send_append_locked(void)
   }
 }
 
-// The leader adds an entry and sends it now, not on the next 100 ms tick.
-// Returns its index, 0 if the log is full. Under `lock`.
+// The leader adds an entry. Returns its index, 0 if the log is full. The
+// caller then sends one APPEND right away (not on the next 100 ms tick); one
+// is enough even after several entries, the ACKs pull the rest. Under `lock`.
 static uint16_t leader_append_locked(uint8_t entry)
 {
   if (!log_append(term, entry)) {
     log_full = true; // our own entries are always valid, so the log is full
     return 0;
   }
-  send_append_locked();
   return log_last_index();
 }
 
 static void leader_append(uint8_t entry)
 {
   pthread_mutex_lock(&lock);
-  leader_append_locked(entry);
+  if (leader_append_locked(entry))
+    send_append_locked();
   pthread_mutex_unlock(&lock);
 }
 
@@ -275,6 +285,8 @@ static void log_network_changes_locked(bool cockpit_ok, const bool bus_ok[2], co
   int n = network_diff(&have, &want, entries);
   for (int i = 0; i < n; i++)
     leader_append_locked(entries[i]);
+  if (n > 0)
+    send_append_locked();
 }
 
 // CLIENT (catalog.h): seq, kind, target node, entry (REQUEST) or leader ID
@@ -300,6 +312,7 @@ static void on_client(int z, const uint8_t d[8])
   if (req != last_req[z]) {
     uint16_t index = leader_append_locked(entry);
     if (index != 0) { // 0: log full, so not taken; the client keeps retrying
+      send_append_locked();
       last_req[z] = req;
       event_index[z] = index;
       if (RAFT_DEBUG)
@@ -346,6 +359,11 @@ static void advance_commit_locked(void)
 // Failure: its log didn't fit at prev, and `match` is its last index after
 // dropping what conflicted, so we resend from there. A follower that rebooted
 // (RAM log) reports 0 and gets the whole log again.
+//
+// Catch-up: send the next APPEND right away, not on the 100 ms tick, when
+// this ACK moved the follower and the next APPEND is for it. Not on every
+// ACK: both followers ACK every APPEND, so with both behind each APPEND
+// would trigger two more (a flood). This way it is one APPEND per entry.
 static void on_append_ack(int z, const uint8_t d[8])
 {
   uint8_t seq = d[0] & CAN_SEQ_MASK;
@@ -354,6 +372,7 @@ static void on_append_ack(int z, const uint8_t d[8])
   pthread_mutex_lock(&lock);
   if (seq != last_ack_seq[z]) {
     last_ack_seq[z] = seq;
+    uint16_t before = next_index[z];
     if (match > log_last_index())
       match = log_last_index();
     if (d[2]) {
@@ -361,17 +380,20 @@ static void on_append_ack(int z, const uint8_t d[8])
         match_index[z] = match;
       next_index[z] = match_index[z] + 1;
     } else {
-      if (match < match_index[z]) {
-        match_index[z] = match; // it lost entries (reboot): stop counting them
-        last_req[z] = 0;        // and its request numbers start again at 1
+      if (match < match_index[z])
+        match_index[z] = match; // it lost entries: stop counting them
+      if (match == 0) {         // empty log: it rebooted, and its request
+        last_req[z] = 0;        // numbers start again at 1
         event_index[z] = 0;
       }
       next_index[z] = match + 1;
     }
 
     advance_commit_locked();
-    if (next_index[z] <= log_last_index())
-      send_append_locked(); // behind: send its next entry now
+    int behind;
+    if (next_index[z] != before && next_index[z] <= log_last_index() &&
+        next_to_send_locked(&behind) == next_index[z])
+      send_append_locked();
     if (RAFT_DEBUG && !d[2])
       printf("[N1] RAFT ACK N%d failed, resend from %d\n", z + 2, next_index[z]);
   }
@@ -462,11 +484,6 @@ static void *tick(void *arg)
     // fault, rule 3), and OKs EVENTs that have committed
     if (is_leader && now - start_ms >= LOG_CHANGES_AFTER_MS)
       log_network_changes_locked(!own_fault, bus_ok, failed);
-    for (int z = 0; z < 2; z++)
-      if (failed[z]) { // it may reboot, and its request numbers restart at 1
-        last_req[z] = 0;
-        event_index[z] = 0;
-      }
     send_client_oks_locked();
     pthread_mutex_unlock(&lock);
 

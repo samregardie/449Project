@@ -92,8 +92,8 @@ static void update(void)
  */
 static void print_status(void)
 {
-	static char last[128];
-	char line[128];
+	static char last[192];
+	char line[192];
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	bool error = in_error;
 
@@ -111,6 +111,10 @@ static void print_status(void)
 				      (int)atomic_get(&zone_fault[z]));
 		}
 	}
+
+	/* Our own controllers: "stopped" means a restart after a failed send didn't take */
+	n += snprintk(line + n, sizeof(line) - n, " | can A=%s B=%s", canbus_state(BUS_A),
+		      canbus_state(BUS_B));
 
 	if (strcmp(line, last) != 0) {
 		printk("%s\n", line);

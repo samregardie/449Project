@@ -161,6 +161,17 @@ uint32_t canbus_ms_since(uint16_t id, enum canbus_bus bus)
 	return seen ? k_uptime_get_32() - seen : UINT32_MAX;
 }
 
+const char *canbus_state(enum canbus_bus bus)
+{
+	static const char *const names[] = { "active", "warning", "passive", "bus-off", "stopped" };
+	enum can_state state;
+
+	if (can_get_state(can[bus], &state, NULL) != 0 || state >= ARRAY_SIZE(names)) {
+		return "unknown";
+	}
+	return names[state];
+}
+
 int canbus_init(void)
 {
 	for (int b = 0; b < BUS_COUNT; b++) {

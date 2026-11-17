@@ -37,4 +37,8 @@ int canbus_forward(enum canbus_bus bus, const struct can_frame *frame);
 /* ms since `id` last arrived on `bus`, either copy. UINT32_MAX if never */
 uint32_t canbus_ms_since(uint16_t id, enum canbus_bus bus);
 
+/* Debug: the controller's state ("active", "passive", "bus-off", "stopped", ...).
+ * Threads only (it talks to the MCP2515 over SPI) */
+const char *canbus_state(enum canbus_bus bus);
+
 #endif
