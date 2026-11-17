@@ -211,6 +211,12 @@ int errorstate_init(errorstate_cb_t cb)
 	printk("N%d boot, reset cause 0x%x%s\n", NODE_ID, cause,
 	       (cause & RESET_WATCHDOG) ? " (WATCHDOG)" : "");
 
+	/* Same line as the Pi's (receiver.c): at checkoff, proof all three nodes match */
+	printk("N%d config: N=%d default_leader=%d seed=%d heartbeat_ms=%d append_ms=%d "
+	       "missed_heartbeats=%d jitter_ms=%d log_size=%d debug=%d\n",
+	       NODE_ID, RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
+	       RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
+
 	if (gpio_pin_configure_dt(&deg[BUS_A], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&err_pin, GPIO_OUTPUT_ACTIVE) != 0 ||

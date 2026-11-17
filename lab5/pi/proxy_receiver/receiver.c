@@ -49,6 +49,8 @@
 #define ERR_GPIO 26
 #define LEADER_GPIO 16 // high while this node is the Raft leader
 #define SYNC_GPIO 20   // high while this node's clock follows global time
+#define PPS_GPIO 23    // rising edge on every whole second of global time
+#define PPS_HIGH_MS 100
 static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
 #define TICK_MS RAFT_HEARTBEAT_MS // REF goes out on every tick
@@ -325,6 +327,28 @@ static void *input(void *arg)
   return NULL;
 }
 
+// PPS (Part 6.4): rising edge on every whole second of global time, then the
+// same print as the STM32s. While the Pi leads, its clock is global time, so
+// ratio 1 and no correction; that changes once it can follow another leader.
+static void *pps(void *arg)
+{
+  while (!quit) {
+    int64_t next = (global_gettime() / 1000000 + 1) * 1000000;
+    int64_t at = next - global_offset_us; // the same instant on CLOCK_MONOTONIC
+    struct timespec ts = { .tv_sec = at / 1000000, .tv_nsec = at % 1000000 * 1000 };
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+
+    gpioWrite(PPS_GPIO, 1);
+    int64_t g = global_gettime(), l = now_us();
+    printf("[N1] PPS global=%lld.%06lld local=%lld.%06lld ratio=1.000000 corr=0us step=0us\n",
+           (long long)(g / 1000000), (long long)(g % 1000000),
+           (long long)(l / 1000000), (long long)(l % 1000000));
+    usleep(PPS_HIGH_MS * 1000);
+    gpioWrite(PPS_GPIO, 0);
+  }
+  return NULL;
+}
+
 int main()
 {
   if (gpioInitialise() < 0)
@@ -332,7 +356,7 @@ int main()
   gpioSetSignalFunc(SIGINT, on_signal);
   gpioSetSignalFunc(SIGTERM, on_signal);
   const int outputs[] = { UDP_RX_GPIO, CMD_TX_GPIO, DEG_A_GPIO, DEG_B_GPIO, ERR_GPIO,
-                          LEADER_GPIO, SYNC_GPIO, can_tx_gpio[0], can_tx_gpio[1] };
+                          LEADER_GPIO, SYNC_GPIO, PPS_GPIO, can_tx_gpio[0], can_tx_gpio[1] };
   for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++) {
     gpioSetMode(outputs[i], PI_OUTPUT);
     gpioWrite(outputs[i], PI_LOW);
@@ -357,7 +381,7 @@ int main()
   struct timeval timeout = { .tv_usec = 100000 };
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-  pthread_t tick_tid, tid;
+  pthread_t tick_tid, pps_tid, tid;
   // SCHED_FIFO so Linux load can't delay HB_TX/HB_MON long enough to look like
   // a lost zone. Threads created after this inherit it. Below the kernel's IRQ
   // threads (50), which deliver our CAN frames.
@@ -365,7 +389,8 @@ int main()
   if (sched_setscheduler(0, SCHED_FIFO, &sp) < 0)
     perror("SCHED_FIFO");
 
-  // One line with every Raft setting: at checkoff, proof all three nodes match
+  // One line with every Raft setting: at checkoff, proof all three nodes match.
+  // The STM32s print the same line (errorstate.c); keep the two in step.
   printf("N1 config: N=%d default_leader=%d seed=%d heartbeat_ms=%d append_ms=%d "
          "missed_heartbeats=%d jitter_ms=%d log_size=%d debug=%d\n",
          RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
@@ -373,6 +398,7 @@ int main()
   printf("N1 boot: term %d, leader %d\n", term, leader);
 
   pthread_create(&tick_tid, NULL, tick, NULL);
+  pthread_create(&pps_tid, NULL, pps, NULL);
   pthread_create(&tid, NULL, can_rx, NULL);
   pthread_create(&tid, NULL, input, NULL);
 
@@ -430,8 +456,10 @@ int main()
     toggle(CMD_TX_GPIO);
   }
 
-  // can_rx and input never touch GPIO, so only tick has to stop first
+  // can_rx and input never touch GPIO, so only tick and pps have to stop first
+  // (pps can take up to ~1 s: it may be waiting for the next second)
   pthread_join(tick_tid, NULL);
+  pthread_join(pps_tid, NULL);
   gpioTerminate();
   return 0;
 }

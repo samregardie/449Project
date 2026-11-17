@@ -62,12 +62,18 @@ static int64_t clock_us(void)
 	return ts.tv_sec * USEC_PER_SEC + ts.tv_nsec / NSEC_PER_USEC;
 }
 
+/* Drift correction for the time since the last REF. Caller holds `lock` */
+static int64_t correction_locked(int64_t clock)
+{
+	return (clock - set_at) * (leader_span - local_span) / local_span;
+}
+
 /* Caller holds `lock` */
 static int64_t global_locked(void)
 {
 	int64_t clock = clock_us();
 
-	return clock + (clock - set_at) * (leader_span - local_span) / local_span;
+	return clock + correction_locked(clock);
 }
 
 int64_t global_gettime(void)
@@ -135,15 +141,23 @@ static void on_ref(const struct can_frame *f)
 /*
  * PPS: a timer ISR raises the pin on the whole global second, so the edge
  * doesn't wait for this low-priority thread; the thread prints and lowers it.
+ * The print is also the handout's periodic drift print (6.3): corr is the
+ * drift correction global_gettime() is applying at the edge.
  */
-static int64_t pps_global, pps_local;
+static int64_t pps_global, pps_local, pps_corr;
 
 K_SEM_DEFINE(pps_sem, 0, 1);
 
 static void pps_rise(struct k_timer *timer)
 {
 	gpio_pin_set_dt(&pps, 1);
-	pps_global = global_gettime();
+
+	K_SPINLOCK(&lock) {
+		int64_t clock = clock_us();
+
+		pps_corr = correction_locked(clock);
+		pps_global = clock + pps_corr;
+	}
 	pps_local = local_us();
 	k_sem_give(&pps_sem);
 }
@@ -171,11 +185,11 @@ static void pps_loop(void *p1, void *p2, void *p3)
 			was_synced = synced;
 		}
 
-		printk("[N%d] PPS global=%d.%06d local=%d.%06d ratio=%d.%06d step=%dus%s\n",
+		printk("[N%d] PPS global=%d.%06d local=%d.%06d ratio=%d.%06d corr=%dus step=%dus%s\n",
 		       NODE_ID, (int)(pps_global / USEC_PER_SEC), (int)(pps_global % USEC_PER_SEC),
 		       (int)(pps_local / USEC_PER_SEC), (int)(pps_local % USEC_PER_SEC),
-		       (int)(ratio_ppm / 1000000), (int)(ratio_ppm % 1000000), (int)step,
-		       was_synced ? "" : " (not synced)");
+		       (int)(ratio_ppm / 1000000), (int)(ratio_ppm % 1000000), (int)pps_corr,
+		       (int)step, was_synced ? "" : " (not synced)");
 
 		k_msleep(PPS_HIGH_MS);
 		gpio_pin_set_dt(&pps, 0);

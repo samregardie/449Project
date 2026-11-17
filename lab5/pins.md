@@ -1,9 +1,22 @@
-# Lab 3 pin assignments
+# Pin assignments (Lab 5)
 
 From `stm32-front/app.overlay`, `stm32-rear/app.overlay` and `pi/proxy_receiver/receiver.c`.
-"Old" is the Lab 2 pins as they were in the `lab3-setup` commit, before CAN.
 STM32 pins are written Arduino name / MCU pin. CN7 and CN10 are the morpho headers.
 Update this file whenever an overlay changes.
+
+## New in Lab 5
+
+| Signal | Pi, N1 (BCM, header pin) | N2 front and N3 rear (same pins on both) | What it shows |
+|---|---|---|---|
+| LEADER LED | GPIO16 (36) | PA15 (CN7 pin 17) | High while this node is the Raft leader. STM32: not driven until elections exist |
+| SYNC LED | GPIO20 (38) | PD2 (CN7 pin 4) | High while this node's clock follows global time (always on the leader) |
+| REF_RX | - (Pi leads for now) | PB7 (CN7 pin 21) | Toggles on every REF received |
+| PPS | GPIO23 (16) | PC3 (CN7 pin 37) | Rising edge on every whole second of global time, high for 100 ms |
+| HZ | not decided | not decided | Checkoff 1 scopes it with FL and RL; ask the TA |
+
+Optional, for timing checks without a scope (`gpiomon` on the Pi): any two free Pi inputs, e.g. GPIO21 (40) and GPIO12 (32), wired to FL/RL or to the two PPS pins. STM32 outputs are 3.3 V, so they are safe for the Pi.
+
+The rest of this file is the Lab 3 wiring, which Lab 5 keeps. "Old" is the Lab 2 pins as they were in the `lab3-setup` commit, before CAN.
 
 ## CAN modules (same wiring on both STM32 boards)
 
@@ -35,14 +48,10 @@ Modules are 3.3 V only.
 | CAN_TX_B | - | D15 / PB8 |
 | RELAY_TX | - | A4 / PC1 |
 | Test button | - | B1 / PC13 (blue button) |
-| SYNC LED (Lab 5) | - | PD2 (CN7 pin 4) |
-| LEADER LED (Lab 5) | - | PA15 (CN7 pin 17) |
-| REF_RX (Lab 5) | - | PB7 (CN7 pin 21) |
-| PPS (Lab 5) | - | PC3 (CN7 pin 37) |
 | CAN modules | - (SPI1 disabled) | see above |
 
 Free: A5 / PC0. D13 / PA5 is free but drives LD2.
-Avoid PB12-PB15 for new pins: the board file enables SPI2 on them.
+On both STM32s, avoid PB12-PB15 for new pins: the board file enables SPI2 on them.
 
 EXTI lines in use: CAN 10, 8; button 13.
 
@@ -72,10 +81,6 @@ EXTI lines in use: CAN 10, 8; button 13.
 | CAN_TX_A | - | PC6 (CN10 pin 4) | |
 | CAN_TX_B | - | PC5 (CN10 pin 6) | |
 | Test button | - | B1 / PC13 | |
-| SYNC LED (Lab 5) | - | PD2 (CN7 pin 4) | Same 4 pins on both nodes |
-| LEADER LED (Lab 5) | - | PA15 (CN7 pin 17) | |
-| REF_RX (Lab 5) | - | PB7 (CN7 pin 21) | |
-| PPS (Lab 5) | - | PC3 (CN7 pin 37) | |
 | CAN modules | - (SPI1 disabled) | see above | |
 
 Free: only D13 / PA5 (LD2) on the Arduino header; use morpho pins for more.
@@ -93,8 +98,6 @@ EXTI lines in use: CAN 10, 8; encoders 9, 0, 1, 4; button 13. Every interrupt pi
 | DEG_A LED | - | GPIO13 (33) |
 | DEG_B LED | - | GPIO19 (35) |
 | ERR | - | GPIO26 (37) |
-| LEADER LED (Lab 5) | - | GPIO16 (36) |
-| SYNC LED (Lab 5) | - | GPIO20 (38) |
 | UART to STM32 | serial0 / ttyAMA5 | removed (CAN instead) |
 | SPI SCK / MOSI / MISO | - | GPIO11 (23) / GPIO10 (19) / GPIO9 (21) |
 | CS bus A / B | - | CE0 = GPIO8 (24) / CE1 = GPIO7 (26) |
