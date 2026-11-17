@@ -1,18 +1,27 @@
 /*
- * RELAY: the dispatch tap decides, the relay thread sends.
+ * RELAY / routing (Part 5): the dispatch tap decides, the relay thread sends.
  *
- * A node relays when it sees, from its own receive times, that the other two
- * zones share no bus: no HB from one on bus A and none from the other on bus
- * B for RELAY_DETECT_MS. N2 covers N1/N3 (scenario c), N3 covers N1/N2 and
- * the Pi covers N2/N3. With one node off one bus, or a whole bus down, a
- * common bus remains and nothing is forwarded. RELAY_DETECT_MS is below
- * ZONE_TIMEOUT_MS, so relayed heartbeats arrive before a zone is declared
- * failed. Only new frames reach the tap, so a frame is relayed at most once
- * per node and can't loop.
+ * A node relays the other two zones' frames to the other bus when either:
+ * - network: the committed network (getNetwork(), via relay_set_network())
+ *   says they share no bus and we are on both. This is the routing table.
+ * - local: we see it ourselves from receive times: no HB from one on bus A
+ *   and none from the other on bus B for RELAY_DETECT_MS.
+ * The local check is needed too: when a cut separates the leader from a
+ * node, the leader can't hear that node until someone relays, so without it
+ * the log would mark the node down and never route to it. RELAY_DETECT_MS is
+ * below ZONE_TIMEOUT_MS, so relayed heartbeats arrive before a zone is
+ * declared failed; once the log catches up, the network rule takes over.
+ *
+ * N2 covers N1/N3 (scenario c), N3 covers N1/N2 and the Pi covers N2/N3.
+ * With one node off one bus, or a whole bus down, a common bus remains and
+ * nothing is forwarded. Only new frames reach the tap, so a frame is relayed
+ * at most once per node and can't loop.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/printk.h>
 
 #include "canbus.h"
 #include "relay.h"
@@ -37,29 +46,54 @@ struct relay_msg {
 
 K_MSGQ_DEFINE(relay_queue, sizeof(struct relay_msg), RELAY_QUEUE_LEN, 4);
 
+static atomic_t net_relay;	/* the network rule, set by the raft thread */
+
+void relay_set_network(bool relay)
+{
+	atomic_set(&net_relay, relay);
+}
+
 static bool silent(uint16_t id, enum canbus_bus bus)
 {
 	return canbus_ms_since(id, bus) > RELAY_DETECT_MS;
 }
 
-/* The other two zones have no bus in common */
+/* The local rule: the other two zones have no bus in common, as we hear them */
 static bool split(void)
 {
 	return (silent(HB_ID(ZONE_X), BUS_B) && silent(HB_ID(ZONE_Y), BUS_A)) ||
 	       (silent(HB_ID(ZONE_X), BUS_A) && silent(HB_ID(ZONE_Y), BUS_B));
 }
 
+static bool relaying(void)
+{
+	return atomic_get(&net_relay) || split();
+}
+
 /*
  * Dispatch thread: must not block. Every frame we receive is from one of the
- * other two zones (our own IDs have no handler), so when split, all of it
+ * other two zones (our own IDs have no handler), so when relaying, all of it
  * goes across.
  */
 static void on_frame(const struct can_frame *f, enum canbus_bus bus)
 {
-	if (split()) {
+	if (relaying()) {
 		struct relay_msg msg = { .frame = *f, .bus = bus == BUS_A ? BUS_B : BUS_A };
 
 		k_msgq_put(&relay_queue, &msg, K_NO_WAIT);
+	}
+}
+
+/* "[N2] ROUTE relay N1<->N3 on (network)" when relaying starts or stops */
+static void print_route(void)
+{
+	static int printed;	/* 0 off, 1 network, 2 local */
+	int now = atomic_get(&net_relay) ? 1 : split() ? 2 : 0;
+
+	if (now != printed) {
+		printk("[N%d] ROUTE relay N%d<->N%d %s\n", NODE_ID, ZONE_X, ZONE_Y,
+		       now == 1 ? "on (network)" : now == 2 ? "on (local)" : "off");
+		printed = now;
 	}
 }
 
@@ -68,9 +102,12 @@ static void relay_loop(void *p1, void *p2, void *p3)
 	struct relay_msg msg;
 
 	while (1) {
-		k_msgq_get(&relay_queue, &msg, K_FOREVER);
-		gpio_pin_toggle_dt(&relay_tx);
-		canbus_forward(msg.bus, &msg.frame);
+		/* Wake at least every 20 ms (one HB period) to report route changes */
+		if (k_msgq_get(&relay_queue, &msg, K_MSEC(20)) == 0) {
+			gpio_pin_toggle_dt(&relay_tx);
+			canbus_forward(msg.bus, &msg.frame);
+		}
+		print_route();
 	}
 }
 

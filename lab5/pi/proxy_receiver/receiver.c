@@ -427,6 +427,28 @@ static void print_commits(void)
   }
 }
 
+// N2 and N3 have no bus in common: one is silent on A, the other on B. Under `lock`.
+static bool split(int64_t now)
+{
+  bool silent[2][2];
+  for (int z = 0; z < 2; z++)
+    for (int b = 0; b < 2; b++)
+      silent[z][b] = now - last_hb_ms[z][b] > RELAY_DETECT_MS;
+  return (silent[0][0] && silent[1][1]) || (silent[0][1] && silent[1][0]);
+}
+
+// Routing (Part 5): relay N2 <-> N3 when the committed network says they share
+// no bus (the routing table, network_relay()), or when we see it ourselves
+// (split()). The local check is needed until the log catches up: see relay.c
+// on the STM32s. Returns 0 = off, 1 = network, 2 = local. Under `lock`.
+static int route_locked(int64_t now)
+{
+  struct network net = get_network();
+  if (network_relay(&net, NODE_COCKPIT))
+    return 1;
+  return split(now) ? 2 : 0;
+}
+
 // Every 20 ms: REF and APPEND (while leader), HB_TX, HB_MON, FAULT, BLINK_TX.
 // Only this thread sends these IDs.
 static void *tick(void *arg)
@@ -434,6 +456,7 @@ static void *tick(void *arg)
   uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0;
   int sent_blink = -1, ticks = 0, append_ticks = 0;
   bool was_error = false, was_test = false;
+  int printed_route = 0; // ROUTE line on change
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
   struct timespec next;
   clock_gettime(CLOCK_MONOTONIC, &next);
@@ -485,7 +508,14 @@ static void *tick(void *arg)
     if (is_leader && now - start_ms >= LOG_CHANGES_AFTER_MS)
       log_network_changes_locked(!own_fault, bus_ok, failed);
     send_client_oks_locked();
+    int route = route_locked(now);
     pthread_mutex_unlock(&lock);
+
+    if (route != printed_route) {
+      printf("[N1] ROUTE relay N2<->N3 %s\n",
+             route == 1 ? "on (network)" : route == 2 ? "on (local)" : "off");
+      printed_route = route;
+    }
 
     gpioWrite(DEG_A_GPIO, !bus_ok[0]);
     gpioWrite(DEG_B_GPIO, !bus_ok[1]);
@@ -528,16 +558,6 @@ static void *tick(void *arg)
   return NULL;
 }
 
-// N2 and N3 have no bus in common: one is silent on A, the other on B. Under `lock`.
-static bool split(int64_t now)
-{
-  bool silent[2][2];
-  for (int z = 0; z < 2; z++)
-    for (int b = 0; b < 2; b++)
-      silent[z][b] = now - last_hb_ms[z][b] > RELAY_DETECT_MS;
-  return (silent[0][0] && silent[1][1]) || (silent[0][1] && silent[1][0]);
-}
-
 // Heartbeats from N2/N3, and FORCE forwarded to the proxy.
 // RELAY: while N2 and N3 share no bus, their HBs and FAULTs go to the other bus
 // unchanged (same ID and seq, so receivers dedup). Everything else N1 sends on both.
@@ -577,7 +597,7 @@ static void *can_rx(void *arg)
 
     if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
       pthread_mutex_lock(&lock);
-      bool relay = split(now_ms());
+      bool relay = route_locked(now_ms()) != 0;
       pthread_mutex_unlock(&lock);
       if (relay) {
         struct sockaddr_can to = { .can_family = AF_CAN, .can_ifindex = ifindex[!bus] };

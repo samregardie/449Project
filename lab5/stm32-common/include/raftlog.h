@@ -75,6 +75,13 @@ struct network log_latest_network(void);
 int network_diff(const struct network *have, const struct network *want,
 		 uint8_t out[NETWORK_DIFF_MAX]);
 
+/*
+ * Routing (Part 5), from the committed network: true when node `me` should
+ * relay, i.e. two other nodes are up but share no bus, and `me` is on both
+ * buses, so it can carry their frames across.
+ */
+bool network_relay(const struct network *net, int me);
+
 /* Printing, the same text on every node */
 const char *entry_name(uint8_t entry);	/* "LINK_A_DOWN" */
 void network_format(const struct network *net, char *buf, size_t size);	/* "N1=up(A,B) N2=..." */

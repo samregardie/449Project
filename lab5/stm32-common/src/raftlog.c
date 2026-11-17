@@ -233,6 +233,28 @@ int network_diff(const struct network *have, const struct network *want,
 	return count;
 }
 
+static bool share_a_bus(const struct network *n, int x, int y)
+{
+	return (n->link_up[x][0] && n->link_up[y][0]) || (n->link_up[x][1] && n->link_up[y][1]);
+}
+
+bool network_relay(const struct network *n, int me)
+{
+	if (!n->node_up[me] || !n->link_up[me][0] || !n->link_up[me][1]) {
+		return false;	/* we can only carry frames across if we are on both buses */
+	}
+
+	for (int x = 1; x <= RAFT_N; x++) {
+		for (int y = x + 1; y <= RAFT_N; y++) {
+			if (x != me && y != me && n->node_up[x] && n->node_up[y] &&
+			    !share_a_bus(n, x, y)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 /* ---- Printing ---- */
 
 const char *entry_name(uint8_t entry)

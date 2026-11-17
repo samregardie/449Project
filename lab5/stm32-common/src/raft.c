@@ -20,6 +20,7 @@
 #include "canbus.h"
 #include "raft.h"
 #include "raftlog.h"
+#include "relay.h"
 
 /* Below the CAN, control and HB threads (1-3) */
 #define RAFT_PRIO K_PRIO_PREEMPT(4)
@@ -267,6 +268,9 @@ static void print_commits(void)
 
 		network_format(&net, buf, sizeof(buf));
 		printk("[N%d] NET %s\n", NODE_ID, buf);
+
+		/* Routing (Part 5): rebuilt from the network every time it changes */
+		relay_set_network(network_relay(&net, NODE_ID));
 	}
 }
 

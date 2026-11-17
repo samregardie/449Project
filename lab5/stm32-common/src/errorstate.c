@@ -112,9 +112,19 @@ static void print_status(void)
 		}
 	}
 
-	/* Our own controllers: "stopped" means a restart after a failed send didn't take */
-	n += snprintk(line + n, sizeof(line) - n, " | can A=%s B=%s", canbus_state(BUS_A),
-		      canbus_state(BUS_B));
+	/*
+	 * Our own controllers, only when something is wrong beyond a cut bus:
+	 * "stopped" (a restart after a failed send didn't take) or "bus-off".
+	 * Not "passive": on a cut bus it flips between passive and active with
+	 * every controller restart, which reprinted this line every second.
+	 */
+	for (int b = 0; b < BUS_COUNT; b++) {
+		const char *state = canbus_state(b);
+
+		if (strcmp(state, "stopped") == 0 || strcmp(state, "bus-off") == 0) {
+			n += snprintk(line + n, sizeof(line) - n, " | can %c=%s", 'A' + b, state);
+		}
+	}
 
 	if (strcmp(line, last) != 0) {
 		printk("%s\n", line);
