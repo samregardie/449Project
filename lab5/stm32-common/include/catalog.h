@@ -22,7 +22,7 @@
  * 0x01C+n    VOTE_Nn        voter      reply to REQ_VOTE          term, candidate ID, granted (0/1)
  * 0x020      FAULT          any        on a fault                 zone ID, reason (FAULT_*)
  * 0x040+n    APPEND_Nn      leader     100 ms, or a new entry     term, prev index (2), prev term,
- *                                                                 commit index (2), entry
+ *                                                                 entry term, commit distance, entry
  * 0x044+n    APPEND_ACK_Nn  follower   reply to APPEND            term, success (0/1),
  *                                                                 match index (2)
  * 0x048+n    CLIENT_Nn      any node   topology change or event   kind (CLIENT_*), target node ID,
@@ -33,7 +33,11 @@
  * 0x200      BLINK          N1         on change + every 100 ms   state (BLINK_*)
  * 0x300      FORCE          N2         50 ms                      int8
  *
- * An APPEND with entry 0 (ENTRY_NONE) carries no entry: the 100 ms keep-alive.
+ * APPEND is about index prev + 1. An entry of 0 (ENTRY_NONE) means there is
+ * none: the 100 ms keep-alive. Entry term: entries keep the term they were
+ * created in, which can be older than the leader's term after an election.
+ * Commit distance: the leader's commit index is prev + 1 - distance, capped
+ * at 255 back; a commit index that is too low is safe, just late.
  * CLIENT request number: the sender counts up once per new request and
  * repeats the number on a retry, so the leader can drop the repeat.
  * BLINK is state only: the STM32s time the lamps from global time.

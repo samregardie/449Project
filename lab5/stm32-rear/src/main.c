@@ -9,6 +9,7 @@
 #include "drive.h"
 #include "errorstate.h"
 #include "globaltime.h"
+#include "raft.h"
 #include "relay.h"
 
 #define BRAKE_THRESHOLD 10	/* brake above 10% counts as pressed */
@@ -34,6 +35,7 @@ int main(void)
 {
 	if (drive_init() != 0 || errorstate_init(drive_set_error) != 0 ||
 	    blinker_init() != 0 || relay_init() != 0 || globaltime_init() != 0 ||
+	    raft_init() != 0 ||
 	    canbus_on(CAN_ID_CTRL, on_ctrl) != 0 || canbus_init() != 0) {
 		printk("init failed\n");
 		return 1;

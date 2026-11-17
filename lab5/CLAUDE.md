@@ -4,7 +4,9 @@ Lab 5: Time Synchronization and Consensus (due 2026-11-18, 11:59pm). The spec is
 
 ## Current state of this folder
 
-`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`). Lab 5 so far: the Pi is the fixed leader (step 1). In `tick()` it sends REF every 20 ms and an empty APPEND every 100 ms, drives LEADER (GPIO16) and SYNC (GPIO20), has `global_gettime()` (monotonic + offset, 0 while it leads) and prints its config at boot. No log, elections or STM32 Raft code yet.
+`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`). Lab 5 so far: the Pi is the fixed leader (step 1). In `tick()` it sends REF every 20 ms and an empty APPEND every 100 ms, drives LEADER (GPIO16) and SYNC (GPIO20), has `global_gettime()` (monotonic + offset, 0 while it leads) and prints its config at boot. Log replication, leader side (Pi, step 3 of the plan): `send_append_locked()` sends the next entry for the follower furthest behind, skipping followers silent on both buses for 60 ms (else one unplugged node blocks commits); an empty APPEND is just the "next entry" past the end. It goes out every 100 ms, right after the leader appends, and right after an ACK that shows a follower behind. `on_append_ack()` acts on one copy per seq (ACKs arrive on both buses), sets `next_index = match + 1`, and lowers `match_index` on a failed ACK (rebooted follower). `advance_commit_locked()` commits the newest current-term entry held by a majority (the Pi counts itself). `print_commits()` runs last in `tick()`. Test key on the Pi: `e` + Enter appends EVENT N1.
+
+Follower side (STM32, `stm32-common/src/raft.c`): `on_append()` in the CAN dispatch thread, under `raft_lock` (k_mutex): refuse an older term; check prev index/term, else drop the conflicting entry and report our last index; store the entry unless we have it (same index and term); commit up to min(leader commit, match); reply APPEND_ACK. A low-priority thread (`raft_print`, prio 5) woken by a semaphore applies and prints COMMIT/NET. No elections yet; the Raft client (link changes, test-button EVENT) is next. The 60 KB log puts RAM at ~78 % (N2) / ~82 % (N3).
 
 STM32 clock sync (`stm32-common/src/globaltime.c`, step 2): both STM32s follow REF from any node. Team decisions: timestamp in the REF handler; `REF_DELAY_US` is one measured constant (placeholder 270 = frame time until scoped); `sys_clock_settime()` at every REF, with `CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000` because the clock counts in ticks; drift ratio over ~1 s windows, applied in `global_gettime()` between REFs; a new window (ratio 1) on the first REF, after sync loss or on a new REF ID. SYNC goes off after 3 missed REFs. PPS rises from a timer ISR and the low-priority thread prints `global local ratio corr step`; corr is the drift correction `global_gettime()` applies at the edge, so this line is also the handout's periodic drift print (6.3). The Pi has PPS too (GPIO23, `pps()` thread, same line; ratio 1 while it leads). LEADER (PA15) is in the overlays but not driven yet. Blinkers (`blinker.c`) run off global time: a lamp is on while (global / half period) is even; turn 1 Hz, error hazards (BLINK_HAZARD) 2 Hz, failure mode (no HB_N1 on either bus) 4 Hz. A timer ISR runs on every 125 ms boundary of global time. BLINK is state only; the Pi sends it on change and every 100 ms. HZ test point: not decided yet. A few comments and `pins.md` still say "Lab 3" or mention `stm32-can-test`, which was removed.
 
@@ -39,7 +41,7 @@ The full table (IDs, senders, timing, byte layouts, FAULT/BLINK/CLIENT values) l
 - Every message more than one node can send has one ID per node, `base + n` with n = node ID 1–3. That includes REF and APPEND: during a handover two nodes can both think they lead, and a shared ID would collide on the bus and break the `(ID, seq)` dedup.
 - Priority: CTRL (0x010) > REF_Nn (0x012–0x014) > REQ_VOTE/VOTE > FAULT > APPEND/ACK/CLIENT > HB > BLINK > FORCE. CTRL's 2 ms deadline wins; REF waits at most one frame (~270 µs), which bounds the extra sync error.
 - REF = term, a 1-byte cycle counter, 5-byte leader time in µs. A new leader continues the cycle counter from the last REF it heard. The seq nibble stays dedup-only.
-- APPEND carries one entry; entry 0 means none (the 100 ms keep-alive). When an ACK says a follower is behind, send the next APPEND right away, not on the next tick (checkoff 7 replay).
+- APPEND carries one entry; entry 0 means none (the 100 ms keep-alive). Layout: term, prev index (2), prev term, entry term, commit distance, entry. The entry keeps its own term (older than the leader's after an election, needed for checkoff 7 replay); the commit index is sent as prev + 1 − distance, capped 255 back (too low is safe, just late). When an ACK says a follower is behind, send the next APPEND right away, not on the next tick (checkoff 7 replay).
 - MEMBER (link/node changes) and EVENT are log entry kinds inside APPEND/CLIENT, not CAN IDs.
 - CLIENT = kind (request / redirect / ok), target node, entry or leader ID, request number.
 
@@ -54,7 +56,7 @@ The full table (IDs, senders, timing, byte layouts, FAULT/BLINK/CLIENT values) l
 
 One byte, type in the high nibble and node ID in the low nibble (`0x63` = LINK_A_DOWN for N3); never 0. The table, `ENTRY()` helpers and `entry_valid()` are in `stm32-common/include/catalog.h`. Bus A = the handout's CAN 1.
 
-Storage: two plain arrays, `uint8_t term[LOG_SIZE]` and `uint8_t entry[LOG_SIZE]`; the index is the array position. 30,000 × 2 B = 60 KB, which fits next to the ~17 KB the apps use now. A struct with a stored `uint16_t` index pads to 6 B per entry (180 KB) and does not fit.
+Storage: two plain arrays, `uint8_t term[LOG_SIZE]` and `uint8_t entry[LOG_SIZE]`; the index is the array position. Implemented once in plain C, `stm32-common/src/raftlog.c` (log + state machine + `get_network()` + print helpers), compiled by the Pi's `build.sh` and both CMakeLists; the caller holds its own lock. Index 1 is the first entry, 0 = none. Before any entry the network is the full topology (all nodes and links up) with the cockpit in error; the leader logs only changes. RAM only: a rebooted node starts empty and is replayed from index 1. 30,000 × 2 B = 60 KB, which fits next to the ~17 KB the apps use now. A struct with a stored `uint16_t` index pads to 6 B per entry (180 KB) and does not fit.
 
 Rules:
 1. **No-op requests are ignored.** The leader appends only if the entry changes the state (a link already down stays one entry). Several nodes reporting the same failure, and retries after a redirect, give one entry.
@@ -63,8 +65,10 @@ Rules:
 4. **NODE_UP is followed by its links.** `addNode` brings a node back with no links, so the leader also appends LINK_A_UP / LINK_B_UP for each link that works.
 5. **CLIENT request numbers.** A client counts up once per new request and repeats the number on a retry; the leader remembers the last number it accepted per node and drops repeats. This is what keeps EVENTs exactly-once.
 6. **Reject malformed entries** with `entry_valid()`: types 0 and 0xA–0xF, node IDs outside 1–3, or a node ID on COCKPIT_*.
-7. **Log full** (30,000 entries): <team to decide: stop and go to error, or wrap>.
+7. **Log full** (30,000 entries): stop and go to error. `log_append()` refuses; the leader enters error.
 8. **Wait after boot before voting.** The log, term and vote are in RAM, so a rebooted node waits one election timeout (hears REF, learns the term) before granting any vote, so it can't vote twice in one term.
+9. **Followers at different positions.** APPEND is one broadcast frame, so the leader sends the next entry for the follower that is furthest behind; a follower that already has it just ACKs.
+10. **EVENT source:** each test-button press (B1) on an STM32 also sends an EVENT for that node (checkoff 5: N2's EVENT reaches N3 via the Pi).
 
 Console lines, the same format on every node, printed from a thread (never the CAN RX path):
 ```

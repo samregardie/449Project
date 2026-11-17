@@ -28,6 +28,7 @@
 #include "state.h"
 #include "catalog.h"     // CAN IDs, payload layouts, log entries (shared with the STM32s)
 #include "raft_config.h" // Raft config (shared with the STM32s)
+#include "raftlog.h"     // replicated log and state machine (shared with the STM32s)
 
 /** Configure this **/
 //#define LOCAL_HOST "172.26.166.54" // IP of local interface
@@ -76,12 +77,19 @@ static int blink_req; // from the paddles
 
 static atomic_bool inject_bad;
 
-// Raft state. Only tick() uses it for now; put it under `lock` once can_rx()
+// Raft state. Only tick() changes it for now; put it under `lock` once can_rx()
 // changes it too (votes, APPEND from another leader).
 // With a default leader every node boots in term 1 with that leader (Part 2).
 static uint8_t term = RAFT_DEFAULT_LEADER != RAFT_NO_LEADER ? 1 : 0;
 static int leader = RAFT_DEFAULT_LEADER; // node ID, RAFT_NO_LEADER = none known
 static uint8_t cycle;                    // REF cycle counter; a new leader continues it
+
+// Leader's view of each follower, under `lock` (with the log). Zone 0 is N2, 1 is N3.
+static uint16_t next_index[2] = { 1, 1 }; // next entry to send it
+static uint16_t match_index[2];           // last entry it confirmed
+static uint8_t last_ack_seq[2] = { 0xFF, 0xFF }; // ACKs arrive on both buses: act on one copy
+static uint8_t seq_append;
+static bool log_full; // rule 7: the log refused an entry, so we stay in error
 
 // Global time = local monotonic clock + offset. The offset is 0 while the Pi
 // leads; when it follows another leader (checkoff 7), sync sets the offset.
@@ -166,19 +174,128 @@ static void send_ref(uint8_t seq)
   send_both(CAN_ID_REF(NODE_COCKPIT), d);
 }
 
-// APPEND (catalog.h): seq, term, prev index (2), prev term, commit index (2), entry.
-// No log yet, so this is the empty keep-alive: everything after term is 0.
-static void send_empty_append(uint8_t seq)
+// A follower we can hear: its HB on either bus within HB_TIMEOUT_MS. Under `lock`.
+static bool follower_alive(int z, int64_t now)
 {
-  uint8_t d[8] = { seq & CAN_SEQ_MASK, term, 0, 0, 0, 0, 0, ENTRY_NONE };
+  return now - last_hb_ms[z][0] <= HB_TIMEOUT_MS || now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
+}
+
+// APPEND (catalog.h): seq, term, prev index (2), prev term, entry term, commit distance, entry.
+// APPEND is one broadcast frame, so it carries the next entry for the follower
+// furthest behind. Followers we can't hear are skipped, or one unplugged node
+// would hold everyone back. When everyone is up to date the "next entry" is
+// past the end of the log: entry 0, the keep-alive. Under `lock`.
+static void send_append_locked(void)
+{
+  int64_t now = now_ms();
+  uint16_t n = log_last_index() + 1;
+  for (int z = 0; z < 2; z++)
+    if (follower_alive(z, now) && next_index[z] < n)
+      n = next_index[z];
+
+  uint16_t prev = n - 1, commit = log_commit_index();
+  int distance = n - commit; // commit <= last < n on a keep-alive, so this is >= 1 there
+  if (distance < 0)
+    distance = 0;
+  if (distance > 255)
+    distance = 255; // too low a commit index is safe: the follower catches up later
+  uint8_t d[8] = { seq_append++ & CAN_SEQ_MASK, term, prev & 0xFF, prev >> 8, log_term(prev),
+                   log_term(n), distance, log_entry(n) };
   send_both(CAN_ID_APPEND(NODE_COCKPIT), d);
+
+  if (RAFT_DEBUG && d[7] != ENTRY_NONE)
+    printf("[N1] RAFT APPEND idx=%d term=%d %s (0x%02x) commit=%d\n", n, log_term(n),
+           entry_name(d[7]), d[7], commit);
+}
+
+// The leader adds an entry and sends it now, not on the next 100 ms tick
+static void leader_append(uint8_t entry)
+{
+  pthread_mutex_lock(&lock);
+  if (log_append(term, entry))
+    send_append_locked();
+  else
+    log_full = true; // our own entries are always valid, so the log is full
+  pthread_mutex_unlock(&lock);
+}
+
+// Commit the newest entry of this term that a majority has (the Pi counts
+// itself). Older-term entries commit along with it. Under `lock`.
+static void advance_commit_locked(void)
+{
+  for (uint16_t i = log_last_index(); i > log_commit_index(); i--) {
+    int count = 1;
+    for (int z = 0; z < 2; z++)
+      count += match_index[z] >= i;
+    if (count >= RAFT_MAJORITY && log_term(i) == term) {
+      log_set_commit(i);
+      return;
+    }
+  }
+}
+
+// APPEND_ACK (catalog.h): seq, term, success (0/1), match index (2).
+// Success: the follower has everything up to `match`. Failure: its log didn't
+// fit at prev, and `match` is its last index after dropping what conflicted,
+// so we resend from there. A follower that rebooted (RAM log) reports 0 and
+// gets the whole log again.
+static void on_append_ack(int z, const uint8_t d[8])
+{
+  uint8_t seq = d[0] & CAN_SEQ_MASK;
+  uint16_t match = d[3] | d[4] << 8;
+
+  pthread_mutex_lock(&lock);
+  if (seq != last_ack_seq[z]) {
+    last_ack_seq[z] = seq;
+    if (match > log_last_index())
+      match = log_last_index();
+    if (d[2])
+      match_index[z] = match;
+    else if (match < match_index[z])
+      match_index[z] = match; // it lost entries (reboot): stop counting them
+    next_index[z] = match + 1;
+
+    advance_commit_locked();
+    if (next_index[z] <= log_last_index())
+      send_append_locked(); // behind: send its next entry now
+    if (RAFT_DEBUG && !d[2])
+      printf("[N1] RAFT ACK N%d failed, resend from %d\n", z + 2, next_index[z]);
+  }
+  pthread_mutex_unlock(&lock);
+}
+
+// Apply newly committed entries and print them, the same lines on every node.
+// The lock is held only to apply; printing happens outside it.
+static void print_commits(void)
+{
+  bool any = false;
+  for (;;) {
+    pthread_mutex_lock(&lock);
+    uint16_t i = log_apply_next();
+    uint8_t t = log_term(i), e = log_entry(i);
+    pthread_mutex_unlock(&lock);
+    if (i == 0)
+      break;
+    printf("[N1] COMMIT idx=%d term=%d %s node=%d (0x%02x)\n", i, t, entry_name(e),
+           ENTRY_NODE(e), e);
+    any = true;
+  }
+
+  if (any) {
+    char buf[96];
+    pthread_mutex_lock(&lock);
+    struct network net = get_network();
+    pthread_mutex_unlock(&lock);
+    network_format(&net, buf, sizeof(buf));
+    printf("[N1] NET %s\n", buf);
+  }
 }
 
 // Every 20 ms: REF and APPEND (while leader), HB_TX, HB_MON, FAULT, BLINK_TX.
 // Only this thread sends these IDs.
 static void *tick(void *arg)
 {
-  uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0, seq_append = 0;
+  uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0;
   int sent_blink = -1, ticks = 0, append_ticks = 0;
   bool was_error = false, was_test = false;
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
@@ -200,7 +317,9 @@ static void *tick(void *arg)
       send_ref(seq_ref++);
       if (++append_ticks == RAFT_APPEND_MS / RAFT_HEARTBEAT_MS) {
         append_ticks = 0;
-        send_empty_append(seq_append++);
+        pthread_mutex_lock(&lock);
+        send_append_locked();
+        pthread_mutex_unlock(&lock);
       }
     }
     gpioWrite(LEADER_GPIO, is_leader);
@@ -221,7 +340,7 @@ static void *tick(void *arg)
     }
     bool test = test_fault;
     int64_t udp_age = now - last_udp_ms;
-    bool own_fault = test || udp_age > UDP_TIMEOUT_MS; // sent in HB_N1, so N2/N3 follow
+    bool own_fault = test || udp_age > UDP_TIMEOUT_MS || log_full; // in HB_N1, so N2/N3 follow
     bool error = own_fault || other_fault || failed[0] || failed[1];
     int blink = error ? BLINK_HAZARD : blink_req;
     pthread_mutex_unlock(&lock);
@@ -260,6 +379,9 @@ static void *tick(void *arg)
       uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink };
       send_both(CAN_ID_BLINK, b);
     }
+
+    // Last, after every frame of this tick is out
+    print_commits();
   }
   return NULL;
 }
@@ -300,6 +422,10 @@ static void *can_rx(void *arg)
       pthread_mutex_unlock(&lock);
     } else if (f.can_id == CAN_ID_FORCE) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
+    } else if (f.can_id == CAN_ID_APPEND_ACK(NODE_STEERING)) {
+      on_append_ack(0, f.data);
+    } else if (f.can_id == CAN_ID_APPEND_ACK(NODE_DRIVE)) {
+      on_append_ack(1, f.data);
     }
 
     if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
@@ -315,15 +441,23 @@ static void *can_rx(void *arg)
   return NULL;
 }
 
-// Enter on stdin: the next CTRL is out of range (bad-input test)
+// Test keys on stdin:
+//   Enter       the next CTRL is out of range (bad-input test)
+//   e + Enter   the leader appends an EVENT for N1 (log replication test)
 // read(), not getchar(): getchar() locks stdin while it waits, and
 // gpioTerminate()'s fflush(NULL) would then wait forever for that lock
 static void *input(void *arg)
 {
-  char c;
-  while (read(STDIN_FILENO, &c, 1) == 1)
-    if (c == '\n')
-      inject_bad = true;
+  char c, prev = '\n';
+  while (read(STDIN_FILENO, &c, 1) == 1) {
+    if (c == '\n') {
+      if (prev == 'e')
+        leader_append(ENTRY(ENTRY_EVENT, NODE_COCKPIT));
+      else
+        inject_bad = true;
+    }
+    prev = c;
+  }
   return NULL;
 }
 
@@ -396,6 +530,7 @@ int main()
          RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
          RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
   printf("N1 boot: term %d, leader %d\n", term, leader);
+  raftlog_init(); // before the threads: they all use the log
 
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&pps_tid, NULL, pps, NULL);
