@@ -112,6 +112,12 @@
 		can-tx-a-gpios = <&arduino_header ARDUINO_HEADER_R3_D11 GPIO_ACTIVE_HIGH>;
 		can-tx-b-gpios = <&arduino_header ARDUINO_HEADER_R3_D15 GPIO_ACTIVE_HIGH>;
 		relay-tx-gpios = <&arduino_header ARDUINO_HEADER_R3_A4 GPIO_ACTIVE_HIGH>;
+
+		/* Lab 5, morpho CN7 pins 4, 17, 21, 37 (same on both nodes) */
+		sync-gpios = <&gpiod 2 GPIO_ACTIVE_HIGH>;
+		leader-gpios = <&gpioa 15 GPIO_ACTIVE_HIGH>;
+		ref-rx-gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+		pps-gpios = <&gpioc 3 GPIO_ACTIVE_HIGH>;
 	};
 };
 

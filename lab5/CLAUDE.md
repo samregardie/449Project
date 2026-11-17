@@ -4,7 +4,9 @@ Lab 5: Time Synchronization and Consensus (due 2026-11-18, 11:59pm). The spec is
 
 ## Current state of this folder
 
-`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`). Lab 5 so far: the Pi is the fixed leader (step 1). In `tick()` it sends REF every 20 ms and an empty APPEND every 100 ms, drives LEADER (GPIO16) and SYNC (GPIO20), has `global_gettime()` (monotonic + offset, 0 while it leads) and prints its config at boot. No log, elections or STM32 Raft code yet. A few comments and `pins.md` still say "Lab 3" or mention `stm32-can-test`, which was removed.
+`lab5/` started as a copy of the finished Lab 3 code (commit `2daa8d7`). Lab 5 so far: the Pi is the fixed leader (step 1). In `tick()` it sends REF every 20 ms and an empty APPEND every 100 ms, drives LEADER (GPIO16) and SYNC (GPIO20), has `global_gettime()` (monotonic + offset, 0 while it leads) and prints its config at boot. No log, elections or STM32 Raft code yet.
+
+STM32 clock sync (`stm32-common/src/globaltime.c`, step 2): both STM32s follow REF from any node. Team decisions: timestamp in the REF handler; `REF_DELAY_US` is one measured constant (placeholder 270 = frame time until scoped); `sys_clock_settime()` at every REF, with `CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000` because the clock counts in ticks; drift ratio over ~1 s windows, applied in `global_gettime()` between REFs; a new window (ratio 1) on the first REF, after sync loss or on a new REF ID. SYNC goes off after 3 missed REFs. PPS rises from a timer ISR and the low-priority thread prints. LEADER (PA15) is in the overlays but not driven yet. Blinkers still follow BLINK, not global time. A few comments and `pins.md` still say "Lab 3" or mention `stm32-can-test`, which was removed.
 
 ```
 lab5/

@@ -35,9 +35,14 @@ Modules are 3.3 V only.
 | CAN_TX_B | - | D15 / PB8 |
 | RELAY_TX | - | A4 / PC1 |
 | Test button | - | B1 / PC13 (blue button) |
+| SYNC LED (Lab 5) | - | PD2 (CN7 pin 4) |
+| LEADER LED (Lab 5) | - | PA15 (CN7 pin 17) |
+| REF_RX (Lab 5) | - | PB7 (CN7 pin 21) |
+| PPS (Lab 5) | - | PC3 (CN7 pin 37) |
 | CAN modules | - (SPI1 disabled) | see above |
 
 Free: A5 / PC0. D13 / PA5 is free but drives LD2.
+Avoid PB12-PB15 for new pins: the board file enables SPI2 on them.
 
 EXTI lines in use: CAN 10, 8; button 13.
 
@@ -67,6 +72,10 @@ EXTI lines in use: CAN 10, 8; button 13.
 | CAN_TX_A | - | PC6 (CN10 pin 4) | |
 | CAN_TX_B | - | PC5 (CN10 pin 6) | |
 | Test button | - | B1 / PC13 | |
+| SYNC LED (Lab 5) | - | PD2 (CN7 pin 4) | Same 4 pins on both nodes |
+| LEADER LED (Lab 5) | - | PA15 (CN7 pin 17) | |
+| REF_RX (Lab 5) | - | PB7 (CN7 pin 21) | |
+| PPS (Lab 5) | - | PC3 (CN7 pin 37) | |
 | CAN modules | - (SPI1 disabled) | see above | |
 
 Free: only D13 / PA5 (LD2) on the Arduino header; use morpho pins for more.
