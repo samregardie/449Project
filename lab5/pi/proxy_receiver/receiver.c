@@ -52,7 +52,7 @@
 static const int can_tx_gpio[2] = { 5, 6 }; // CAN_TX_A, CAN_TX_B
 
 #define TICK_MS RAFT_HEARTBEAT_MS // REF goes out on every tick
-#define BLINK_TICKS 25    // toggle every 500 ms = 1 Hz
+#define BLINK_TICKS 5     // repeat BLINK every 100 ms
 #define HB_TIMEOUT_MS 60  // 3 missed heartbeats
 #define RELAY_DETECT_MS 30 // one missed heartbeat, plus margin (same as the STM32 relay)
 #define UDP_TIMEOUT_MS 200 // wheel link lost. TODO (team): justify; Wi-Fi gaps exceed 60 ms
@@ -178,7 +178,7 @@ static void *tick(void *arg)
 {
   uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0, seq_append = 0;
   int sent_blink = -1, ticks = 0, append_ticks = 0;
-  bool phase = false, was_error = false, was_test = false;
+  bool was_error = false, was_test = false;
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
   struct timespec next;
   clock_gettime(CLOCK_MONOTONIC, &next);
@@ -249,13 +249,13 @@ static void *tick(void *arg)
     }
     was_test = test;
 
-    // New state: send now, lamps on. Same state: toggle every 500 ms.
+    // State only: the STM32s time the lamps from global time.
+    // Send on change, and every 100 ms so a node that missed one catches up.
     bool changed = blink != sent_blink;
-    if (changed || (blink != BLINK_OFF && ++ticks == BLINK_TICKS)) {
-      phase = changed ? blink != BLINK_OFF : !phase;
+    if (changed || ++ticks == BLINK_TICKS) {
       sent_blink = blink;
       ticks = 0;
-      uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink, phase };
+      uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink };
       send_both(CAN_ID_BLINK, b);
     }
   }

@@ -1,66 +1,59 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
 
 #include "blinker.h"
 #include "canbus.h"
 #include "errorstate.h"
+#include "globaltime.h"
 
-/* Own hazards with no cockpit: 1 Hz, same as the cockpit's */
-#define LOCAL_HALF_PERIOD_MS 500
+/* Half periods: a lamp is on while (global time / half period) is even */
+#define TURN_HALF_US 500000	/* turn signal, 1 Hz */
+#define ERROR_HALF_US 250000	/* hazards in the error state, 2 Hz */
+#define FAILURE_HALF_US 125000	/* failure mode (no cockpit), 4 Hz */
+
+/* Every lamp edge falls on a multiple of the shortest half period */
+#define TICK_US FAILURE_HALF_US
 
 static const struct gpio_dt_spec left = GPIO_DT_SPEC_GET(DT_NODELABEL(blink_left), gpios);
 static const struct gpio_dt_spec right = GPIO_DT_SPEC_GET(DT_NODELABEL(blink_right), gpios);
 
-/* Shared by the dispatch thread and the timer ISR */
-static struct k_spinlock lock;
-static bool local;		/* cockpit lost: we run our own hazards */
-static bool local_on;
-
-static void set_lamps(bool l, bool r)
-{
-	gpio_pin_set_dt(&left, l);
-	gpio_pin_set_dt(&right, r);
-}
-
-/* Byte 1 = state, byte 2 = phase (1 = lamps on) */
-static void on_blink(const struct can_frame *f)
-{
-	uint8_t state = f->data[1];
-	bool on = f->data[2];
-	k_spinlock_key_t key = k_spin_lock(&lock);
-
-	if (!local) {
-		set_lamps(on && (state == BLINK_LEFT || state == BLINK_HAZARD),
-			  on && (state == BLINK_RIGHT || state == BLINK_HAZARD));
-	}
-
-	k_spin_unlock(&lock, key);
-}
+static atomic_t state = ATOMIC_INIT(BLINK_OFF);	/* from the last BLINK */
 
 /*
- * Timer ISR. No HB_N1 on either bus means no BLINK either, so we flash
- * hazards ourselves (nothing to stay in sync with). When the cockpit is
- * back, lamps off until its next BLINK.
+ * Timer ISR on every TICK_US of global time. With no HB_N1 on either bus
+ * there is no cockpit and no BLINK, so we flash hazards ourselves (failure
+ * mode); both STM32s do it from global time, so they stay in step.
  */
-static void local_tick(struct k_timer *timer)
+static void lamp_tick(struct k_timer *timer)
 {
 	bool lost = canbus_ms_since(CAN_ID_HB_N1, BUS_A) > ZONE_TIMEOUT_MS &&
 		    canbus_ms_since(CAN_ID_HB_N1, BUS_B) > ZONE_TIMEOUT_MS;
-	k_spinlock_key_t key = k_spin_lock(&lock);
+	int s = lost ? BLINK_HAZARD : atomic_get(&state);
+	int64_t half = lost ? FAILURE_HALF_US : s == BLINK_HAZARD ? ERROR_HALF_US : TURN_HALF_US;
+	int64_t now = global_gettime();
+	bool on = (now / half) % 2 == 0;
 
 	if (lost) {
-		local = true;
-		local_on = !local_on;
-		set_lamps(local_on, local_on);
-	} else if (local) {
-		local = false;
-		set_lamps(false, false);
+		atomic_set(&state, BLINK_OFF);	/* lamps off when the cockpit is back, until its BLINK */
 	}
 
-	k_spin_unlock(&lock, key);
+	gpio_pin_set_dt(&left, on && (s == BLINK_LEFT || s == BLINK_HAZARD));
+	gpio_pin_set_dt(&right, on && (s == BLINK_RIGHT || s == BLINK_HAZARD));
+
+	/* Next edge. Waking a few us early just runs this again right away. */
+	k_timer_start(timer, K_USEC(TICK_US - now % TICK_US), K_NO_WAIT);
 }
 
-K_TIMER_DEFINE(local_timer, local_tick, NULL);
+K_TIMER_DEFINE(lamp_timer, lamp_tick, NULL);
+
+/* BLINK byte 1 = state. A new state shows now, not at the next edge */
+static void on_blink(const struct can_frame *f)
+{
+	if (atomic_set(&state, f->data[1]) != f->data[1]) {
+		k_timer_start(&lamp_timer, K_NO_WAIT, K_NO_WAIT);
+	}
+}
 
 int blinker_init(void)
 {
@@ -69,6 +62,6 @@ int blinker_init(void)
 		return -EIO;
 	}
 
-	k_timer_start(&local_timer, K_MSEC(LOCAL_HALF_PERIOD_MS), K_MSEC(LOCAL_HALF_PERIOD_MS));
+	k_timer_start(&lamp_timer, K_NO_WAIT, K_NO_WAIT);
 	return canbus_on(CAN_ID_BLINK, on_blink);
 }

@@ -36,8 +36,7 @@
  * An APPEND with entry 0 (ENTRY_NONE) carries no entry: the 100 ms keep-alive.
  * CLIENT request number: the sender counts up once per new request and
  * repeats the number on a retry, so the leader can drop the repeat.
- * BLINK byte 2 (phase) is the Lab 3 timing; it goes away once the blinkers
- * run on global time.
+ * BLINK is state only: the STM32s time the lamps from global time.
  */
 #ifndef CATALOG_H
 #define CATALOG_H
