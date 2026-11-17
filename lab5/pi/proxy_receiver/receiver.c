@@ -189,9 +189,12 @@ static void send_append_locked(void)
 {
   int64_t now = now_ms();
   uint16_t n = log_last_index() + 1;
+  int behind = -1; // zone of the follower we send for, -1 = nobody behind
   for (int z = 0; z < 2; z++)
-    if (follower_alive(z, now) && next_index[z] < n)
+    if (follower_alive(z, now) && next_index[z] < n) {
       n = next_index[z];
+      behind = z;
+    }
 
   uint16_t prev = n - 1, commit = log_commit_index();
   int distance = n - commit; // commit <= last < n on a keep-alive, so this is >= 1 there
@@ -203,9 +206,18 @@ static void send_append_locked(void)
                    log_term(n), distance, log_entry(n) };
   send_both(CAN_ID_APPEND(NODE_COCKPIT), d);
 
-  if (RAFT_DEBUG && d[7] != ENTRY_NONE)
-    printf("[N1] RAFT APPEND idx=%d term=%d %s (0x%02x) commit=%d\n", n, log_term(n),
-           entry_name(d[7]), d[7], commit);
+  // Debug: print each APPEND that carries an entry once. A resend of the same
+  // index for the same follower (every 100 ms while it doesn't ACK) is not
+  // printed again, so a stuck follower shows as one line, not a stream.
+  static uint16_t printed_n;
+  static int printed_for = -2;
+  if (RAFT_DEBUG && d[7] != ENTRY_NONE && (n != printed_n || behind != printed_for)) {
+    printf("[N1] RAFT APPEND idx=%d term=%d %s (0x%02x) commit=%d for %s\n", n, log_term(n),
+           entry_name(d[7]), d[7], commit,
+           behind == 0 ? "N2" : behind == 1 ? "N3" : "both");
+    printed_n = n;
+    printed_for = behind;
+  }
 }
 
 // The leader adds an entry and sends it now, not on the next 100 ms tick
