@@ -1,16 +1,20 @@
 /*
- * Raft agent on the STM32s: the follower side of log replication.
- * The log and state machine are raftlog.c, shared with the Pi.
+ * Raft agent on the STM32s: the follower side of log replication, and the
+ * Raft client. The log and state machine are raftlog.c, shared with the Pi.
  *
- * Two parts:
- * - on_append() runs in the CAN dispatch thread. It only updates the log and
- *   notes the reply. Sending is left to the raft thread: a send can block for
- *   a few ms when a bus is down, and the dispatch thread also timestamps REF.
- * - The raft thread sends that reply (APPEND_ACK), then applies newly
- *   committed entries and prints them.
+ * Handlers run in the CAN dispatch thread. They only update state and wake
+ * the raft thread, which does all the sending: a send can block for a few ms
+ * when a bus is down, and the dispatch thread also timestamps REF.
+ *
+ * Raft client: link and node changes need no message of our own. Our HB
+ * already carries our view of our own buses, and the leader logs the
+ * changes. The client only sends EVENTs (one per test-button press):
+ * CLIENT REQUEST with a request number, repeated every 100 ms until the
+ * leader's CLIENT_OK, so retries never add a second entry (rule 5).
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/printk.h>
 
 #include "canbus.h"
@@ -20,14 +24,20 @@
 /* Below the CAN, control and HB threads (1-3) */
 #define RAFT_PRIO K_PRIO_PREEMPT(4)
 
-/* The log (raftlog.c is not thread-safe), the term and the pending reply */
+#define CLIENT_RETRY_MS 100
+
+/* The other STM32 */
+#define OTHER_STM32 (NODE_ID == NODE_STEERING ? NODE_DRIVE : NODE_STEERING)
+
+/* Everything below that isn't atomic: the log (raftlog.c is not thread-safe) */
 K_MUTEX_DEFINE(raft_lock);
 
-/* Given on every APPEND, so the raft thread wakes */
+/* Wakes the raft thread: an APPEND, a CLIENT frame or a button press */
 K_SEM_DEFINE(raft_sem, 0, 1);
 
-/* With a default leader every node boots in term 1 (Part 2) */
+/* With a default leader every node boots in term 1 with it (Part 2) */
 static uint8_t term = RAFT_DEFAULT_LEADER != RAFT_NO_LEADER ? 1 : 0;
+static uint8_t leader = RAFT_DEFAULT_LEADER;	/* who we think leads */
 
 /*
  * The reply to the latest APPEND. If two APPENDs arrive before the raft
@@ -39,6 +49,24 @@ static struct {
 	bool ok;
 	uint16_t match;
 } reply;
+
+/* A REQUEST addressed to us, though we don't lead: tell its client who does */
+static struct {
+	bool pending;
+	uint8_t client;
+	uint8_t req;
+} redirect;
+
+/* EVENT client. Request numbers run 1..255, then wrap */
+static atomic_t events_wanted;	/* button presses, from an ISR */
+static atomic_t events_done;	/* OKed by the leader */
+static atomic_t ok_req;		/* request number of the last OK for us */
+static atomic_t retry_now;	/* a REDIRECT told us the leader: resend now */
+
+static uint8_t req_number(int done)
+{
+	return done % 255 + 1;
+}
 
 /*
  * APPEND (catalog.h): seq, term, prev index (2), prev term, entry term,
@@ -64,6 +92,7 @@ static void on_append(const struct can_frame *f)
 
 	if (d[1] >= term) {
 		term = d[1];
+		leader = f->id - CAN_ID_APPEND(0);
 		ok = prev <= log_last_index() && log_term(prev) == prev_term;
 
 		if (!ok && prev <= log_last_index()) {
@@ -96,6 +125,60 @@ static void on_append(const struct can_frame *f)
 	k_sem_give(&raft_sem);
 }
 
+/* CLIENT (catalog.h): seq, kind, target node, entry or leader ID, request number */
+static void on_client(const struct can_frame *f)
+{
+	const uint8_t *d = f->data;
+	uint8_t sender = f->id - CAN_ID_CLIENT(0);
+
+	if (d[2] != NODE_ID) {
+		return;		/* not for us */
+	}
+
+	switch (d[1]) {
+	case CLIENT_OK:
+		atomic_set(&ok_req, d[4]);
+		break;
+	case CLIENT_REDIRECT:
+		k_mutex_lock(&raft_lock, K_FOREVER);
+		leader = d[3];
+		k_mutex_unlock(&raft_lock);
+		atomic_set(&retry_now, 1);
+		break;
+	case CLIENT_REQUEST:
+		k_mutex_lock(&raft_lock, K_FOREVER);
+		redirect.pending = true;
+		redirect.client = sender;
+		redirect.req = d[4];
+		k_mutex_unlock(&raft_lock);
+		break;
+	default:
+		return;
+	}
+
+	k_sem_give(&raft_sem);
+}
+
+/* Only so RELAY can forward it: canbus receives only IDs with a handler */
+static void ignore(const struct can_frame *f)
+{
+}
+
+void raft_event(void)
+{
+	atomic_inc(&events_wanted);
+	k_sem_give(&raft_sem);
+}
+
+/* ---- Raft thread ---- */
+
+static void send_client(uint8_t kind, uint8_t target, uint8_t third, uint8_t req)
+{
+	uint8_t d[8] = { 0, kind, target, third, req };
+
+	canbus_send(CAN_ID_CLIENT(NODE_ID), d);
+}
+
 /* APPEND_ACK (catalog.h): seq, term, success (0/1), match index (2) */
 static void send_reply(void)
 {
@@ -108,6 +191,51 @@ static void send_reply(void)
 
 	if (pending) {
 		canbus_send(CAN_ID_APPEND_ACK(NODE_ID), d);
+	}
+}
+
+static void send_redirect(void)
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	bool pending = redirect.pending && leader != NODE_ID;
+	uint8_t client = redirect.client, req = redirect.req, to = leader;
+
+	redirect.pending = false;
+	k_mutex_unlock(&raft_lock);
+
+	if (pending) {
+		send_client(CLIENT_REDIRECT, client, to, req);
+	}
+}
+
+/* The oldest unOKed EVENT: send it, then again every CLIENT_RETRY_MS */
+static void send_event(void)
+{
+	static int64_t sent_ms;
+	static uint8_t sent_req;
+	int done = atomic_get(&events_done);
+	uint8_t req = req_number(done);
+
+	if (done == atomic_get(&events_wanted)) {
+		return;		/* nothing waiting */
+	}
+
+	if (atomic_get(&ok_req) == req) {
+		atomic_inc(&events_done);
+		printk("[N%d] RAFT EVENT req=%d OK\n", NODE_ID, req);
+		return;		/* the next one (if any) goes out on the next pass */
+	}
+
+	int64_t now = k_uptime_get();
+
+	if (req != sent_req || atomic_clear(&retry_now) || now - sent_ms >= CLIENT_RETRY_MS) {
+		k_mutex_lock(&raft_lock, K_FOREVER);
+		uint8_t to = leader;
+		k_mutex_unlock(&raft_lock);
+
+		send_client(CLIENT_REQUEST, to, ENTRY(ENTRY_EVENT, NODE_ID), req);
+		sent_ms = now;
+		sent_req = req;
 	}
 }
 
@@ -145,8 +273,11 @@ static void print_commits(void)
 static void raft_loop(void *p1, void *p2, void *p3)
 {
 	while (1) {
-		k_sem_take(&raft_sem, K_FOREVER);
+		/* Woken by a frame or a press; the timeout drives EVENT retries */
+		k_sem_take(&raft_sem, K_MSEC(CLIENT_RETRY_MS));
 		send_reply();		/* first: the leader is waiting for it */
+		send_redirect();
+		send_event();
 		print_commits();
 	}
 }
@@ -157,11 +288,16 @@ int raft_init(void)
 {
 	raftlog_init();
 
-	/* Follow whichever node leads */
 	for (int n = 1; n <= RAFT_N; n++) {
-		if (canbus_on(CAN_ID_APPEND(n), on_append) != 0) {
+		if (n != NODE_ID && (canbus_on(CAN_ID_APPEND(n), on_append) != 0 ||
+				     canbus_on(CAN_ID_CLIENT(n), on_client) != 0)) {
 			return -ENOMEM;
 		}
+	}
+
+	/* The other STM32's ACKs reach the Pi through us when we relay */
+	if (canbus_on(CAN_ID_APPEND_ACK(OTHER_STM32), ignore) != 0) {
+		return -ENOMEM;
 	}
 
 	k_thread_start(raft_thread);

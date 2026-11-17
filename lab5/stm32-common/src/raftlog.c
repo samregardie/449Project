@@ -1,6 +1,12 @@
 /*
  * Replicated log and state machine. See raftlog.h. Two plain arrays, so
  * each entry costs 2 bytes: index i lives in slot i - 1.
+ *
+ * Two copies of the network:
+ * - committed: committed entries, applied in order (getNetwork(), Part 4)
+ * - latest:    every entry in the log, committed or not. Only the leader
+ *              uses it, to tell whether a new entry would change anything
+ *              (rule 1) while earlier ones are still waiting to commit.
  */
 
 #include <stdio.h>
@@ -12,19 +18,88 @@ static uint8_t terms[RAFT_LOG_SIZE];
 static uint8_t entries[RAFT_LOG_SIZE];
 static uint16_t last;		/* index of the last entry, 0 = empty */
 static uint16_t commit;		/* highest index known to be committed */
-static uint16_t applied;	/* highest index applied to `net` */
-static struct network net;
+static uint16_t applied;	/* highest index applied to `committed` */
+static struct network committed;
+static struct network latest;
+
+/* ---- State machine ---- */
+
+/* Before any entry: every node and link up, cockpit in error (all boot in error) */
+static struct network initial_network(void)
+{
+	struct network n;
+
+	memset(&n, 0, sizeof(n));
+	for (int node = 1; node <= RAFT_N; node++) {
+		n.node_up[node] = true;
+		n.link_up[node][0] = true;
+		n.link_up[node][1] = true;
+	}
+	return n;
+}
+
+/* The four mutators of Part 4 */
+static void add_link(struct network *n, int node, int bus)
+{
+	n->link_up[node][bus] = true;
+}
+
+static void drop_link(struct network *n, int node, int bus)
+{
+	n->link_up[node][bus] = false;
+}
+
+static void add_node(struct network *n, int node)
+{
+	n->node_up[node] = true;	/* links stay down until their LINK_*_UP */
+}
+
+static void drop_node(struct network *n, int node)
+{
+	n->node_up[node] = false;
+	n->link_up[node][0] = false;
+	n->link_up[node][1] = false;
+}
+
+static void apply(struct network *n, uint8_t entry)
+{
+	int node = ENTRY_NODE(entry);
+
+	switch (ENTRY_TYPE(entry)) {
+	case ENTRY_COCKPIT_OK:
+		n->cockpit_ok = true;
+		break;
+	case ENTRY_COCKPIT_ERROR:
+		n->cockpit_ok = false;
+		break;
+	case ENTRY_NODE_UP:
+		add_node(n, node);
+		break;
+	case ENTRY_NODE_DOWN:
+		drop_node(n, node);
+		break;
+	case ENTRY_LINK_A_UP:
+		add_link(n, node, 0);
+		break;
+	case ENTRY_LINK_A_DOWN:
+		drop_link(n, node, 0);
+		break;
+	case ENTRY_LINK_B_UP:
+		add_link(n, node, 1);
+		break;
+	case ENTRY_LINK_B_DOWN:
+		drop_link(n, node, 1);
+		break;
+	default:
+		break;	/* EVENT: recorded in the log, no change to the network */
+	}
+}
 
 void raftlog_init(void)
 {
 	last = commit = applied = 0;
-	memset(&net, 0, sizeof(net));
-
-	for (int n = 1; n <= RAFT_N; n++) {
-		net.node_up[n] = true;
-		net.link_up[n][0] = true;
-		net.link_up[n][1] = true;
-	}
+	committed = initial_network();
+	latest = initial_network();
 }
 
 /* ---- Log ---- */
@@ -53,6 +128,7 @@ bool log_append(uint8_t term, uint8_t entry)
 	terms[last] = term;
 	entries[last] = entry;
 	last++;
+	apply(&latest, entry);
 	return true;
 }
 
@@ -61,8 +137,16 @@ void log_truncate(uint16_t index)
 	if (index <= commit) {
 		index = commit + 1;
 	}
-	if (index <= last) {
-		last = index - 1;
+	if (index > last) {
+		return;
+	}
+
+	last = index - 1;
+
+	/* Rebuild `latest` from the entries that remain (rare: only on a conflict) */
+	latest = initial_network();
+	for (uint16_t i = 0; i < last; i++) {
+		apply(&latest, entries[i]);
 	}
 }
 
@@ -81,65 +165,6 @@ void log_set_commit(uint16_t index)
 	}
 }
 
-/* ---- State machine ---- */
-
-/* The four mutators of Part 4 */
-static void add_link(int node, int bus)
-{
-	net.link_up[node][bus] = true;
-}
-
-static void drop_link(int node, int bus)
-{
-	net.link_up[node][bus] = false;
-}
-
-static void add_node(int node)
-{
-	net.node_up[node] = true;	/* links stay down until their LINK_*_UP */
-}
-
-static void drop_node(int node)
-{
-	net.node_up[node] = false;
-	net.link_up[node][0] = false;
-	net.link_up[node][1] = false;
-}
-
-static void apply(uint8_t entry)
-{
-	int node = ENTRY_NODE(entry);
-
-	switch (ENTRY_TYPE(entry)) {
-	case ENTRY_COCKPIT_OK:
-		net.cockpit_ok = true;
-		break;
-	case ENTRY_COCKPIT_ERROR:
-		net.cockpit_ok = false;
-		break;
-	case ENTRY_NODE_UP:
-		add_node(node);
-		break;
-	case ENTRY_NODE_DOWN:
-		drop_node(node);
-		break;
-	case ENTRY_LINK_A_UP:
-		add_link(node, 0);
-		break;
-	case ENTRY_LINK_A_DOWN:
-		drop_link(node, 0);
-		break;
-	case ENTRY_LINK_B_UP:
-		add_link(node, 1);
-		break;
-	case ENTRY_LINK_B_DOWN:
-		drop_link(node, 1);
-		break;
-	default:
-		break;	/* EVENT: recorded in the log, no change to the network */
-	}
-}
-
 uint16_t log_apply_next(void)
 {
 	if (applied == commit) {
@@ -147,14 +172,68 @@ uint16_t log_apply_next(void)
 	}
 
 	applied++;
-	apply(entries[applied - 1]);
+	apply(&committed, entries[applied - 1]);
 	return applied;
 }
 
 struct network get_network(void)
 {
-	return net;
+	return committed;
 }
+
+struct network log_latest_network(void)
+{
+	return latest;
+}
+
+/* network_diff() helper: record one entry and apply it to the working copy */
+static void add_entry(struct network *n, uint8_t out[], int *count, uint8_t entry)
+{
+	out[(*count)++] = entry;
+	apply(n, entry);
+}
+
+/*
+ * Walk from `have` to `want` one entry at a time, applying each to a copy so
+ * the next comparison sees its effect. That gives the rule-4 order for free:
+ * NODE_UP leaves the node with no links, so its LINK_*_UP entries follow.
+ * At most 1 + 3 per node entries, so NETWORK_DIFF_MAX always fits.
+ */
+int network_diff(const struct network *have, const struct network *want,
+		 uint8_t out[NETWORK_DIFF_MAX])
+{
+	struct network n = *have;
+	int count = 0;
+
+	if (want->cockpit_ok != n.cockpit_ok) {
+		add_entry(&n, out, &count,
+			  ENTRY(want->cockpit_ok ? ENTRY_COCKPIT_OK : ENTRY_COCKPIT_ERROR, 0));
+	}
+
+	for (int node = 1; node <= RAFT_N; node++) {
+		if (!want->node_up[node]) {
+			if (n.node_up[node]) {
+				add_entry(&n, out, &count, ENTRY(ENTRY_NODE_DOWN, node));
+			}
+			continue;	/* NODE_DOWN dropped its links too */
+		}
+		if (!n.node_up[node]) {
+			add_entry(&n, out, &count, ENTRY(ENTRY_NODE_UP, node));
+		}
+		if (want->link_up[node][0] != n.link_up[node][0]) {
+			add_entry(&n, out, &count,
+				  ENTRY(want->link_up[node][0] ? ENTRY_LINK_A_UP : ENTRY_LINK_A_DOWN, node));
+		}
+		if (want->link_up[node][1] != n.link_up[node][1]) {
+			add_entry(&n, out, &count,
+				  ENTRY(want->link_up[node][1] ? ENTRY_LINK_B_UP : ENTRY_LINK_B_DOWN, node));
+		}
+	}
+
+	return count;
+}
+
+/* ---- Printing ---- */
 
 const char *entry_name(uint8_t entry)
 {

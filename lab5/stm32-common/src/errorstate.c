@@ -14,6 +14,7 @@
 
 #include "canbus.h"
 #include "errorstate.h"
+#include "raft.h"
 
 #define HB_PERIOD_MS 20
 #define DEBOUNCE_MS 50
@@ -184,6 +185,7 @@ static void test_pressed(void)
 
 	atomic_set(&last_press_ms, now);
 	update();
+	raft_event();	/* every press is also an EVENT in the log */
 }
 
 /* ISR on both edges: a press counts only after 50 ms with no edges (bounce) */

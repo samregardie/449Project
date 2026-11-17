@@ -72,6 +72,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static int64_t last_udp_ms;
 static int64_t last_hb_ms[2][2]; // [zone][bus]
 static uint8_t zone_fault[2];
+static uint8_t zone_buses[2]; // HB byte 2: bit0 = it hears someone on A, bit1 = on B
 static bool test_fault;
 static int blink_req; // from the paddles
 
@@ -93,6 +94,15 @@ static uint16_t match_index[2];           // last entry it confirmed
 static uint8_t last_ack_seq[2] = { 0xFF, 0xFF };
 static uint8_t seq_append;
 static bool log_full; // rule 7: the log refused an entry, so we stay in error
+
+// EVENT requests from N2/N3 (rule 5), under `lock`. A retry repeats the
+// request number, so a number we already took is not appended again.
+static uint8_t last_req[2];     // last request number taken from each zone
+static uint16_t event_index[2]; // its log index, until the OK is sent; 0 = none waiting
+static uint8_t seq_client;
+
+#define LOG_CHANGES_AFTER_MS 200 // after start: until then we haven't heard everyone yet
+static int64_t start_ms;
 
 // Global time = local monotonic clock + offset. The offset is 0 while the Pi
 // leads; when it follows another leader (checkoff 7), sync sets the offset.
@@ -223,15 +233,93 @@ static void send_append_locked(void)
   }
 }
 
-// The leader adds an entry and sends it now, not on the next 100 ms tick
+// The leader adds an entry and sends it now, not on the next 100 ms tick.
+// Returns its index, 0 if the log is full. Under `lock`.
+static uint16_t leader_append_locked(uint8_t entry)
+{
+  if (!log_append(term, entry)) {
+    log_full = true; // our own entries are always valid, so the log is full
+    return 0;
+  }
+  send_append_locked();
+  return log_last_index();
+}
+
 static void leader_append(uint8_t entry)
 {
   pthread_mutex_lock(&lock);
-  if (log_append(term, entry))
-    send_append_locked();
-  else
-    log_full = true; // our own entries are always valid, so the log is full
+  leader_append_locked(entry);
   pthread_mutex_unlock(&lock);
+}
+
+// Raft client reports (rules 1-4). Every HB carries the sender's view of its
+// own buses (byte 2), which is the report: only a node's view of its OWN
+// buses is reliable, since relayed HBs make others look present on a bus
+// they're cut off from. A node silent on both buses is down. The leader
+// appends whatever takes the log's newest network to this one; nothing if
+// it already matches, so repeats every 20 ms add nothing (rule 1). Under `lock`.
+static void log_network_changes_locked(bool cockpit_ok, const bool bus_ok[2], const bool failed[2])
+{
+  struct network want = { .cockpit_ok = cockpit_ok };
+  want.node_up[NODE_COCKPIT] = true;
+  want.link_up[NODE_COCKPIT][0] = bus_ok[0];
+  want.link_up[NODE_COCKPIT][1] = bus_ok[1];
+  for (int z = 0; z < 2; z++) {
+    want.node_up[z + 2] = !failed[z];
+    want.link_up[z + 2][0] = !failed[z] && (zone_buses[z] & 1);
+    want.link_up[z + 2][1] = !failed[z] && (zone_buses[z] & 2);
+  }
+
+  struct network have = log_latest_network();
+  uint8_t entries[NETWORK_DIFF_MAX];
+  int n = network_diff(&have, &want, entries);
+  for (int i = 0; i < n; i++)
+    leader_append_locked(entries[i]);
+}
+
+// CLIENT (catalog.h): seq, kind, target node, entry (REQUEST) or leader ID
+// (REDIRECT), request number.
+static void send_client(uint8_t kind, uint8_t target, uint8_t third, uint8_t req)
+{
+  uint8_t d[8] = { seq_client++ & CAN_SEQ_MASK, kind, target, third, req };
+  send_both(CAN_ID_CLIENT(NODE_COCKPIT), d);
+}
+
+// An EVENT request from zone z (rule 5). A new number is appended once; a
+// repeat (the client retrying) is not. If its OK went out already, the OK
+// was lost, so send it again. Anything else is malformed and ignored (rule 6).
+static void on_client(int z, const uint8_t d[8])
+{
+  int node = z + 2;
+  uint8_t entry = d[3], req = d[4];
+  if (d[1] != CLIENT_REQUEST || !entry_valid(entry) || ENTRY_TYPE(entry) != ENTRY_EVENT ||
+      ENTRY_NODE(entry) != node)
+    return;
+
+  pthread_mutex_lock(&lock);
+  if (req != last_req[z]) {
+    uint16_t index = leader_append_locked(entry);
+    if (index != 0) { // 0: log full, so not taken; the client keeps retrying
+      last_req[z] = req;
+      event_index[z] = index;
+      if (RAFT_DEBUG)
+        printf("[N1] RAFT EVENT from N%d req=%d -> idx=%d\n", node, req, index);
+    }
+  } else if (event_index[z] == 0) {
+    send_client(CLIENT_OK, node, 0, req);
+  }
+  pthread_mutex_unlock(&lock);
+}
+
+// CLIENT_OK once a requested EVENT is committed (not before: an OK means it
+// can't be lost). Under `lock`.
+static void send_client_oks_locked(void)
+{
+  for (int z = 0; z < 2; z++)
+    if (event_index[z] != 0 && log_commit_index() >= event_index[z]) {
+      send_client(CLIENT_OK, z + 2, 0, last_req[z]);
+      event_index[z] = 0;
+    }
 }
 
 // Commit the newest entry of this term that a majority has (the Pi counts
@@ -273,8 +361,11 @@ static void on_append_ack(int z, const uint8_t d[8])
         match_index[z] = match;
       next_index[z] = match_index[z] + 1;
     } else {
-      if (match < match_index[z])
+      if (match < match_index[z]) {
         match_index[z] = match; // it lost entries (reboot): stop counting them
+        last_req[z] = 0;        // and its request numbers start again at 1
+        event_index[z] = 0;
+      }
       next_index[z] = match + 1;
     }
 
@@ -366,6 +457,17 @@ static void *tick(void *arg)
     bool own_fault = test || udp_age > UDP_TIMEOUT_MS || log_full; // in HB_N1, so N2/N3 follow
     bool error = own_fault || other_fault || failed[0] || failed[1];
     int blink = error ? BLINK_HAZARD : blink_req;
+
+    // Raft client: the leader logs what changed (COCKPIT_ERROR = our own
+    // fault, rule 3), and OKs EVENTs that have committed
+    if (is_leader && now - start_ms >= LOG_CHANGES_AFTER_MS)
+      log_network_changes_locked(!own_fault, bus_ok, failed);
+    for (int z = 0; z < 2; z++)
+      if (failed[z]) { // it may reboot, and its request numbers restart at 1
+        last_req[z] = 0;
+        event_index[z] = 0;
+      }
+    send_client_oks_locked();
     pthread_mutex_unlock(&lock);
 
     gpioWrite(DEG_A_GPIO, !bus_ok[0]);
@@ -442,6 +544,7 @@ static void *can_rx(void *arg)
       pthread_mutex_lock(&lock);
       last_hb_ms[z][bus] = now_ms();
       zone_fault[z] = f.data[1];
+      zone_buses[z] = f.data[2];
       pthread_mutex_unlock(&lock);
     } else if (f.can_id == CAN_ID_FORCE) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
@@ -449,6 +552,10 @@ static void *can_rx(void *arg)
       on_append_ack(0, f.data);
     } else if (f.can_id == CAN_ID_APPEND_ACK(NODE_DRIVE)) {
       on_append_ack(1, f.data);
+    } else if (f.can_id == CAN_ID_CLIENT(NODE_STEERING)) {
+      on_client(0, f.data);
+    } else if (f.can_id == CAN_ID_CLIENT(NODE_DRIVE)) {
+      on_client(1, f.data);
     }
 
     if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
@@ -554,6 +661,7 @@ int main()
          RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
   printf("N1 boot: term %d, leader %d\n", term, leader);
   raftlog_init(); // before the threads: they all use the log
+  start_ms = now_ms();
 
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&pps_tid, NULL, pps, NULL);

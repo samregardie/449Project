@@ -59,8 +59,21 @@ uint16_t log_apply_next(void);
 
 /* ---- State machine ---- */
 
-/* The current network (the only read, Part 4) */
+/* The current network: committed entries only (the only read, Part 4) */
 struct network get_network(void);
+
+/* The network after every entry in the log, committed or not. The leader
+ * compares against this so it never appends the same change twice (rule 1) */
+struct network log_latest_network(void);
+
+/*
+ * The entries that take `have` to `want`, in order: cockpit, then per node
+ * NODE_DOWN, or NODE_UP followed by its LINK_*_UP/DOWN (rule 4). Returns how
+ * many it wrote to `out`; 0 means nothing changed.
+ */
+#define NETWORK_DIFF_MAX (1 + 3 * RAFT_N)
+int network_diff(const struct network *have, const struct network *want,
+		 uint8_t out[NETWORK_DIFF_MAX]);
 
 /* Printing, the same text on every node */
 const char *entry_name(uint8_t entry);	/* "LINK_A_DOWN" */
