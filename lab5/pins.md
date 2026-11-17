@@ -11,10 +11,7 @@ Update this file whenever an overlay changes.
 | LEADER LED | GPIO16 (36) | PA15 (CN7 pin 17) | High while this node is the Raft leader. STM32: not driven until elections exist |
 | SYNC LED | GPIO20 (38) | PD2 (CN7 pin 4) | High while this node's clock follows global time (always on the leader) |
 | REF_RX | - (Pi leads for now) | PB7 (CN7 pin 21) | Toggles on every REF received |
-| PPS | GPIO23 (16) | PC3 (CN7 pin 37) | Rising edge on every whole second of global time, high for 100 ms |
-| HZ | not decided | not decided | Checkoff 1 scopes it with FL and RL; ask the TA |
-
-Optional, for timing checks without a scope (`gpiomon` on the Pi): any two free Pi inputs, e.g. GPIO21 (40) and GPIO12 (32), wired to FL/RL or to the two PPS pins. STM32 outputs are 3.3 V, so they are safe for the Pi.
+| PPS | GPIO23 (16) | PC3 (CN7 pin 37) | Rising edge on every whole second of global time, high 
 
 The rest of this file is the Lab 3 wiring, which Lab 5 keeps. "Old" is the Lab 2 pins as they were in the `lab3-setup` commit, before CAN.
 
