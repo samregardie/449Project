@@ -5,7 +5,8 @@ log entries and a heartbeat to Redis over Tailscale; Tailscale Funnel serves the
 
 | File | What it is |
 | --- | --- |
-| `app.py` | The whole status page: login, then one route that reads Redis |
+| `app.py` | The server: login, `/` serves the page, `/state` returns fresh data from Redis as JSON |
+| `page.html` | The page; it asks `/state` every second and updates in place |
 | `setup.sh` | Installs and (re)deploys everything on the VM |
 | `vehicle-gui.service` | Runs the page on localhost:8000 |
 | `env.example` | Template for `/etc/vehicle-gui.env` (the secrets, never committed) |

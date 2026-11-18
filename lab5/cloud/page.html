@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicle mirror</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e4e7ec;
+    --ok: #15803d; --ok-bg: #dcfce7; --bad: #b91c1c; --bad-bg: #fee2e2;
+    --warn: #92400e; --warn-bg: #fef3c7; --accent: #1d4ed8; --accent-bg: #dbeafe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b22; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a;
+      --ok: #4ade80; --ok-bg: #12321f; --bad: #f87171; --bad-bg: #3a1515;
+      --warn: #fcd34d; --warn-bg: #3a2e10; --accent: #93c5fd; --accent-bg: #172a46;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+       color: var(--muted); margin: 28px 0 10px; }
+  .pill { padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .pill.live { background: var(--ok-bg); color: var(--ok); }
+  .pill.stale { background: var(--warn-bg); color: var(--warn); }
+  .banner { background: var(--warn-bg); color: var(--warn); padding: 10px 14px;
+            border-radius: 8px; margin-top: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .nodes { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  #content { transition: opacity .3s; }
+  #content.dimmed { opacity: .5; }
+  .node-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .node-name { font-weight: 600; }
+  .label { color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+  .chip.ok { background: var(--ok-bg); color: var(--ok); }
+  .chip.bad { background: var(--bad-bg); color: var(--bad); }
+  .chip.role { background: var(--accent-bg); color: var(--accent); }
+  .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .value.ok { color: var(--ok); } .value.bad { color: var(--bad); }
+  .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td { font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  .empty { color: var(--muted); padding: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Vehicle mirror</h1>
+    <span id="status" class="pill stale">Connecting…</span>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+
+  <div id="content">
+    <h2>Nodes</h2>
+    <div id="nodes" class="grid nodes"></div>
+
+    <h2>Cluster</h2>
+    <div class="grid">
+      <div class="card"><div class="label">Leader · time master</div><div id="leader" class="value">–</div></div>
+      <div class="card"><div class="label">Term</div><div id="term" class="value">–</div></div>
+      <div class="card"><div class="label">Cockpit</div><div id="cockpit" class="value">–</div></div>
+      <div class="card"><div class="label">Held events</div><div id="held" class="value">–</div></div>
+      <div class="card"><div class="label">Global time</div><div id="global" class="value">–</div></div>
+    </div>
+
+    <h2>Latest committed entries</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Index</th><th>Term</th><th>Entry</th><th>Node</th><th>Global time</th><th></th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // A new element with an optional class and text (textContent, so data is never parsed as HTML)
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  const seconds = us => us == null ? '–' : (Number(us) / 1e6).toFixed(3) + ' s';
+
+  function nodeCard(n, leader) {
+    const card = el('div', 'card');
+    const head = el('div', 'node-head');
+    const alive = el('span', 'label');
+    alive.append(el('span', 'dot ' + (n.up ? 'ok' : 'bad')), n.up ? 'Alive' : 'Down');
+    head.append(el('span', 'node-name', `N${n.id} · ${n.name}`), alive);
+
+    const chips = el('div', 'chips');
+    chips.append(el('span', 'chip ' + (n.bus_a ? 'ok' : 'bad'), 'Bus A ' + (n.bus_a ? 'up' : 'down')));
+    chips.append(el('span', 'chip ' + (n.bus_b ? 'ok' : 'bad'), 'Bus B ' + (n.bus_b ? 'up' : 'down')));
+    if (n.id === leader) chips.append(el('span', 'chip role', 'Leader · time master'));
+    card.append(head, chips);
+    return card;
+  }
+
+  function logRow(e) {
+    const tr = el('tr');
+    const tag = el('td');
+    if (e.replayed === '1') tag.append(el('span', 'chip role', 'replayed'));
+    tr.append(el('td', '', e.index), el('td', '', e.term), el('td', '', e.type),
+              el('td', '', 'N' + e.node), el('td', '', seconds(e.global_us)), tag);
+    return tr;
+  }
+
+  function showStatus(text, live, banner) {
+    $('status').textContent = text;
+    $('status').className = 'pill ' + (live ? 'live' : 'stale');
+    $('banner').hidden = !banner;
+    $('banner').textContent = banner || '';
+    $('content').classList.toggle('dimmed', !live);
+  }
+
+  function render(s) {
+    if (!s.stale) showStatus('Live', true);
+    else if (s.seconds_since_heartbeat == null) showStatus('Stale', false, 'No heartbeat from the Pi yet.');
+    else showStatus('Stale', false, `No heartbeat from the Pi for ${s.seconds_since_heartbeat} s. ` +
+                                    'Showing the last known state; it catches up when the Pi is back.');
+
+    $('nodes').replaceChildren(...(s.nodes.length ? s.nodes.map(n => nodeCard(n, s.leader))
+                                                   : [el('div', 'empty', 'No network state yet.')]));
+    $('leader').textContent = s.leader ? 'N' + s.leader : 'Unknown';
+    $('term').textContent = s.term ?? '–';
+    $('cockpit').textContent = s.cockpit === 'ok' ? 'OK' : s.cockpit === 'error' ? 'Error' : '–';
+    $('cockpit').className = 'value ' + (s.cockpit === 'ok' ? 'ok' : s.cockpit === 'error' ? 'bad' : '');
+    $('held').textContent = s.held_events;
+    $('global').textContent = seconds(s.global_us);
+
+    const rows = s.log.map(logRow);
+    if (!rows.length) {
+      const td = el('td', 'empty', 'No entries yet.');
+      td.colSpan = 6;
+      rows.push(el('tr'));
+      rows[0].append(td);
+    }
+    $('log').replaceChildren(...rows);
+  }
+
+  // Ask for fresh data every second; the page itself never reloads
+  async function poll() {
+    try {
+      const res = await fetch('state', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      render(await res.json());
+    } catch (err) {
+      showStatus('Offline', false, "Can't reach the server. Retrying…");
+    }
+    setTimeout(poll, 1000);
+  }
+  poll();
+</script>
+</body>
+</html>
