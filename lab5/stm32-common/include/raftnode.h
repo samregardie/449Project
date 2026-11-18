@@ -79,6 +79,7 @@ void raftnode_notes(char *buf, size_t size);
 
 uint8_t raftnode_term(void);
 bool raftnode_is_leader(void);
+int raftnode_leader(void);	/* who we think leads (also the time master), RAFT_NO_LEADER = don't know */
 bool raftnode_log_full(void);	/* rule 7: our own append was refused, stay in error */
 
 /* Entry `index` was already committed when we received it (checkoff 7:

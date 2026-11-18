@@ -16,3 +16,17 @@ scp -r lab5/cloud ubuntu@449-car:
 ssh ubuntu@449-car 'sudo sh cloud/setup.sh'
 ```
 First time only: create `/etc/vehicle-gui.env` on the VM from `env.example`.
+
+## Pi side
+
+The publisher is `lab5/pi/proxy_receiver/publisher.c`. One-time setup on the Pi:
+```sh
+sudo apt install -y libhiredis-dev
+sudo nano /etc/vehicle-pub.env      # REDIS_PASSWORD=<the Redis password>
+sudo chmod 600 /etc/vehicle-pub.env
+```
+Then `sudo ./run.sh` as usual; it reads that file. Look for `[N1] PUB connected to 449-car`.
+No file means the publisher is off and the cockpit runs as before.
+
+Before a fresh run (all nodes rebooted, log back at index 1), clear the old stream on the VM:
+`redis-cli --askpass DEL vehicle:log`.

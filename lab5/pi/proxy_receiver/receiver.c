@@ -30,6 +30,7 @@
 #include "raft_config.h" // Raft config (shared with the STM32s)
 #include "raftlog.h"     // replicated log and state machine (shared with the STM32s)
 #include "raftnode.h"    // Raft agent (shared with the STM32s)
+#include "publisher.h"   // cloud mirror (extra credit)
 
 /** Configure this **/
 //#define LOCAL_HOST "172.26.166.54" // IP of local interface
@@ -291,6 +292,7 @@ static void print_commits(void)
       break;
     printf("[N1] COMMIT idx=%d term=%d %s node=%d (0x%02x)%s\n", i, t, entry_name(e),
            ENTRY_NODE(e), e, replayed ? " (replayed)" : "");
+    publisher_commit(i, t, e, replayed, global_gettime());
     any = true;
   }
 
@@ -331,7 +333,7 @@ static int route_locked(int64_t now)
 static void *tick(void *arg)
 {
   uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0;
-  int sent_blink = -1, ticks = 0, append_ticks = 0;
+  int sent_blink = -1, ticks = 0, append_ticks = 0, status_ticks = 0;
   bool was_error = false, was_test = false;
   int printed_route = 0; // ROUTE line on change
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
@@ -423,6 +425,18 @@ static void *tick(void *arg)
       ticks = 0;
       uint8_t b[8] = { seq_blink++ & CAN_SEQ_MASK, blink };
       send_both(CAN_ID_BLINK, b);
+    }
+
+    // Cloud mirror heartbeat contents, once a second (the publisher thread sends it)
+    if (++status_ticks == 1000 / TICK_MS) {
+      status_ticks = 0;
+      char net[96];
+      pthread_mutex_lock(&lock);
+      struct network n = get_network();
+      int leader = raftnode_leader();
+      pthread_mutex_unlock(&lock);
+      network_format(&n, net, sizeof(net));
+      publisher_status(global_gettime(), leader, net);
     }
 
     // Last, after every frame of this tick is out
@@ -577,6 +591,10 @@ int main()
   // recv() gives up after 100 ms, so the loop sees `quit` even with no UDP
   struct timeval timeout = { .tv_usec = 100000 };
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+  // Before SCHED_FIFO: the publisher thread does network I/O and must keep
+  // normal priority, below everything that sends CAN frames.
+  publisher_start();
 
   pthread_t tick_tid, pps_tid, tid;
   // SCHED_FIFO so Linux load can't delay HB_TX/HB_MON long enough to look like

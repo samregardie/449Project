@@ -10,6 +10,14 @@ for bus in canA canB; do
   ip link set $bus up
 done
 
+# Cloud mirror: REDIS_PASSWORD (and optionally REDIS_HOST) from a root-only file,
+# so the password is never on the command line. No file = publisher off.
+if [ -f /etc/vehicle-pub.env ]; then
+  set -a
+  . /etc/vehicle-pub.env
+  set +a
+fi
+
 systemctl stop pigpiod 2>/dev/null || true # pigpio can't start while the daemon runs
 sh build.sh
 ./proxy_receiver
