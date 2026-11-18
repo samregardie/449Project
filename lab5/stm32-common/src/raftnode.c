@@ -20,6 +20,10 @@
  *   a node that merely lost the leader's REF for a moment (a jumper pulled,
  *   relaying not started yet: checkoff 5) or is cut off (checkoff 10) never
  *   raises the term and deposes a working leader.
+ * - Check quorum (Raft thesis 6.2): a leader that hears no majority (HBs,
+ *   itself included) for RAFT_ELECTION_TIMEOUT_MIN_MS steps down. Raft alone
+ *   gives a cut-off leader no way to learn it was replaced, so it would keep
+ *   its LEADER light on and keep sending REF next to the new leader.
  */
 
 #include <stdarg.h>
@@ -89,6 +93,7 @@ static int64_t deadline;	/* start an election at this time; 0 = timer not runnin
 static bool restart_timer;	/* heard our leader (or voted): restart on the next poll */
 static bool heard_leader;	/* our leader's REF since the last poll */
 static int64_t leader_ms;	/* when we last heard it (poll time) */
+static int64_t quorum_ms;	/* leader: when we last heard a majority */
 static uint32_t rng;
 
 /* missed_heartbeats x heartbeat_ms + U(0, jitter), Part 2. A plain LCG, the
@@ -158,6 +163,7 @@ static void become_leader(int votes)
 {
 	role = LEADER;
 	leader = me;
+	quorum_ms = now;
 	default_wait = false;
 	for (int n = 1; n <= RAFT_N; n++) {
 		next_index[n] = log_last_index() + 1;
@@ -735,6 +741,21 @@ static void poll_election(void)
 		leader_ms = now;
 	}
 	if (role == LEADER) {
+		int heard = 0;
+
+		for (int n = 1; n <= RAFT_N; n++) {
+			heard += alive[n];
+		}
+		if (heard >= RAFT_MAJORITY) {
+			quorum_ms = now;
+		} else if (now - quorum_ms >= RAFT_ELECTION_TIMEOUT_MIN_MS) {
+			role = FOLLOWER;	/* check quorum: same term, no leader known */
+			leader = RAFT_NO_LEADER;
+			restart_timer = true;
+			if (RAFT_DEBUG) {
+				note("[N%d] RAFT step down term=%d (no majority)\n", me, term);
+			}
+		}
 		return;		/* leaders don't time out */
 	}
 	if (restart_timer) {
