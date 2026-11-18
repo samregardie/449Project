@@ -30,7 +30,9 @@
 #define HEARTBEAT_MS 1000
 #define HEARTBEAT_TTL_S 3 // the GUI shows its stale banner once the key expires
 #define POLL_MS 50
-#define TIMEOUT_S 1       // connect and command timeout, so a dead uplink can't hang us
+// Connect and command timeout, so a dead uplink can't hang us. Generous: campus
+// Wi-Fi and Tailscale relays can take over a second, and this thread has no deadline.
+#define TIMEOUT_S 5
 #define REDIS_PORT 6379
 
 struct pub_entry {
@@ -102,6 +104,10 @@ static bool front_is_new_run(void)
 
 static void disconnect(const char *why)
 {
+  // hiredis reports a reply that took longer than TIMEOUT_S as "Resource
+  // temporarily unavailable" (older versions) or "Timed out"
+  if (strstr(why, "temporarily unavailable") || strstr(why, "Timed out"))
+    why = "no reply within the timeout: slow uplink or busy VM";
   if (!reported_down)
     printf("[N1] PUB %s unreachable (%s), retrying every second\n", host, why);
   reported_down = true;
