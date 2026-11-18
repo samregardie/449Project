@@ -1,0 +1,13 @@
+[Unit]
+Description=Vehicle mirror status page
+After=network-online.target redis-server.service
+
+[Service]
+DynamicUser=yes
+EnvironmentFile=/etc/vehicle-gui.env
+WorkingDirectory=/opt/vehicle-gui
+ExecStart=/opt/vehicle-gui/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
