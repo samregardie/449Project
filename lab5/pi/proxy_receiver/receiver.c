@@ -79,14 +79,17 @@ static int blink_req; // from the paddles
 
 static atomic_bool inject_bad;
 
-#define LOG_CHANGES_AFTER_MS 200 // after start: until then we haven't heard everyone yet
-static int64_t start_ms;
-
-static uint8_t cycle; // REF cycle counter; a new leader continues it
-
-// Global time = local monotonic clock + offset. The offset is 0 while the Pi
-// leads; when it follows another leader (checkoff 7), sync sets the offset.
+// Global time (Part 6) = local monotonic clock + offset, under `lock`. While
+// we follow, each REF from our leader sets the offset (no drift ratio: over
+// 20 ms, 100 ppm is 2 us). While we lead it stays as it was, so global time
+// carries on without a step.
+// Leader reads its clock -> we timestamp the REF: the frame time at 500 kbit/s,
+// the same constant as globaltime.c on the STM32s.
+#define REF_DELAY_US 270
 static int64_t global_offset_us;
+static int64_t ref_step_us;  // how far the last REF moved the offset (PPS print)
+static int64_t last_ref_ms;  // SYNC: a REF from our leader within HB_TIMEOUT_MS
+static uint8_t cycle;        // REF cycle counter, last heard or sent
 
 // Ctrl+C or kill: threads stop touching GPIO, then pigpio is shut down
 static atomic_bool quit;
@@ -121,10 +124,13 @@ static int64_t now_us(void)
   return ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
 }
 
-// Current global time in us (Part 6.3)
+// Current global time in us (Part 6.3). Takes `lock`.
 static int64_t global_gettime(void)
 {
-  return now_us() + global_offset_us;
+  pthread_mutex_lock(&lock);
+  int64_t offset = global_offset_us;
+  pthread_mutex_unlock(&lock);
+  return now_us() + offset;
 }
 
 static void toggle(int gpio)
@@ -158,9 +164,9 @@ static void send_both(uint16_t id, const uint8_t data[8])
 
 // REF (catalog.h): seq, term, cycle, global time in us (5 bytes, little-endian).
 // The time is read last, right before sending: anything after it is sync error.
-static void send_ref(uint8_t seq, uint8_t term)
+static void send_ref(uint8_t seq, uint8_t term, uint8_t cycle)
 {
-  uint8_t d[8] = { seq & CAN_SEQ_MASK, term, cycle++ };
+  uint8_t d[8] = { seq & CAN_SEQ_MASK, term, cycle };
   uint64_t t = global_gettime();
   for (int i = 0; i < 5; i++)
     d[3 + i] = t >> (8 * i);
@@ -169,16 +175,16 @@ static void send_ref(uint8_t seq, uint8_t term)
 
 // ---- Raft agent (raftnode.c, shared with the STM32s) ----
 
-// Raft frames arrive on both buses: act on the first copy only. Same rule as
-// canbus.c on the STM32s: within 100 ms, a seq equal to or up to 8 behind
-// the last one is the other bus's copy. can_rx thread only.
+// Frames arrive on both buses: act on (and relay) the first copy only. Same
+// rule as canbus.c on the STM32s: within 100 ms, a seq equal to or up to 8
+// behind the last one is the other bus's copy. can_rx thread only.
 #define DEDUP_RESET_MS 100
 #define RAFT_IDS (CAN_ID_CLIENT(RAFT_N) + 1) // every Raft ID is below this
 static struct {
   bool seen;
   uint8_t seq;
   int64_t ms;
-} rx_last[RAFT_IDS];
+} rx_last[CAN_SFF_MASK + 1];
 
 static bool is_new(canid_t id, uint8_t seq, int64_t now)
 {
@@ -191,6 +197,38 @@ static bool is_new(canid_t id, uint8_t seq, int64_t now)
   return true;
 }
 
+// What we see of each node (HB_MON), for the Raft agent and for our own
+// DEG/ERR/HB. N2/N3 from their HBs; for us, our own fault (in HB_N1, so
+// N2/N3 follow) and which buses we hear the others on. Under `lock`.
+static void seen_locked(int64_t now, struct node_seen seen[RAFT_N + 1])
+{
+  bool bus_ok[2] = { false, false };
+  for (int z = 0; z < 2; z++) {
+    bool a = now - last_hb_ms[z][0] <= HB_TIMEOUT_MS;
+    bool b = now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
+    bus_ok[0] |= a;
+    bus_ok[1] |= b;
+    seen[z + 2] = (struct node_seen){ .up = a || b, .fault = zone_fault[z], .buses = zone_buses[z] };
+  }
+  bool own_fault = test_fault || now - last_udp_ms > UDP_TIMEOUT_MS || raftnode_log_full();
+  seen[NODE_COCKPIT] = (struct node_seen){ .up = true, .fault = own_fault,
+                                           .buses = bus_ok[0] | bus_ok[1] << 1 };
+}
+
+// REF from our leader: global time is its time plus the frame delay, at rx_us.
+// Under `lock`.
+static void follow_ref_locked(const uint8_t d[8], int64_t rx_us)
+{
+  int64_t leader_us = 0;
+  for (int i = 0; i < 5; i++)
+    leader_us |= (int64_t)d[3 + i] << (8 * i);
+  int64_t offset = leader_us + REF_DELAY_US - rx_us;
+  ref_step_us = offset - global_offset_us;
+  global_offset_us = offset;
+  last_ref_ms = rx_us / 1000;
+  cycle = d[2];
+}
+
 // Run the agent's timed work and send the frames it returns. Called from
 // tick() every 20 ms and from can_rx() after every Raft frame. The frames go
 // out under `lock` (unlike on the STM32s: our sends never block), so two
@@ -200,14 +238,12 @@ static void raft_poll(void)
   static uint8_t tx_seq[RAFT_IDS]; // per ID we send, under `lock`
   struct raft_frame out[RAFT_FRAMES_MAX];
   char notes[384];
-  bool alive[RAFT_N + 1] = { false };
+  struct node_seen seen[RAFT_N + 1];
   int64_t now = now_ms();
 
   pthread_mutex_lock(&lock);
-  alive[NODE_COCKPIT] = true;
-  for (int z = 0; z < 2; z++)
-    alive[z + 2] = now - last_hb_ms[z][0] <= HB_TIMEOUT_MS || now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
-  int count = raftnode_poll(now, alive, out);
+  seen_locked(now, seen);
+  int count = raftnode_poll(now, seen, out);
   for (int i = 0; i < count; i++) {
     out[i].data[0] = tx_seq[out[i].id]++ & CAN_SEQ_MASK;
     send_both(out[i].id, out[i].data);
@@ -218,11 +254,19 @@ static void raft_poll(void)
   printf("%s", notes);
 }
 
-// A Raft frame from N2 or N3: `from` is its CAN ID minus the block's base
-static void on_raft_frame(canid_t id, const uint8_t d[8])
+// A Raft frame from N2 or N3, received at rx_us: `from` is its CAN ID minus
+// the block's base
+static void on_raft_frame(canid_t id, const uint8_t d[8], int64_t rx_us)
 {
   pthread_mutex_lock(&lock);
-  if (id > CAN_ID_APPEND(0) && id <= CAN_ID_APPEND(RAFT_N))
+  if (id > CAN_ID_REF(0) && id <= CAN_ID_REF(RAFT_N)) {
+    if (raftnode_on_ref(id - CAN_ID_REF(0), d))
+      follow_ref_locked(d, rx_us);
+  } else if (id > CAN_ID_REQ_VOTE(0) && id <= CAN_ID_REQ_VOTE(RAFT_N))
+    raftnode_on_req_vote(id - CAN_ID_REQ_VOTE(0), d);
+  else if (id > CAN_ID_VOTE(0) && id <= CAN_ID_VOTE(RAFT_N))
+    raftnode_on_vote(id - CAN_ID_VOTE(0), d);
+  else if (id > CAN_ID_APPEND(0) && id <= CAN_ID_APPEND(RAFT_N))
     raftnode_on_append(id - CAN_ID_APPEND(0), d);
   else if (id > CAN_ID_APPEND_ACK(0) && id <= CAN_ID_APPEND_ACK(RAFT_N))
     raftnode_on_ack(id - CAN_ID_APPEND_ACK(0), d);
@@ -230,25 +274,6 @@ static void on_raft_frame(canid_t id, const uint8_t d[8])
     raftnode_on_client(id - CAN_ID_CLIENT(0), d);
   pthread_mutex_unlock(&lock);
   raft_poll();
-}
-
-// What the leader logs (Raft client, rules 1-4): the network as we see it.
-// Every HB carries the sender's view of its own buses (byte 2), which is the
-// report: only a node's view of its OWN buses is reliable, since relayed HBs
-// make others look present on a bus they're cut off from. A node silent on
-// both buses is down. The agent appends only what changed. Under `lock`.
-static struct network network_seen(bool cockpit_ok, const bool bus_ok[2], const bool failed[2])
-{
-  struct network want = { .cockpit_ok = cockpit_ok };
-  want.node_up[NODE_COCKPIT] = true;
-  want.link_up[NODE_COCKPIT][0] = bus_ok[0];
-  want.link_up[NODE_COCKPIT][1] = bus_ok[1];
-  for (int z = 0; z < 2; z++) {
-    want.node_up[z + 2] = !failed[z];
-    want.link_up[z + 2][0] = !failed[z] && (zone_buses[z] & 1);
-    want.link_up[z + 2][1] = !failed[z] && (zone_buses[z] & 2);
-  }
-  return want;
 }
 
 // Apply newly committed entries and print them, the same lines on every node.
@@ -260,11 +285,12 @@ static void print_commits(void)
     pthread_mutex_lock(&lock);
     uint16_t i = log_apply_next();
     uint8_t t = log_term(i), e = log_entry(i);
+    bool replayed = raftnode_replayed(i);
     pthread_mutex_unlock(&lock);
     if (i == 0)
       break;
-    printf("[N1] COMMIT idx=%d term=%d %s node=%d (0x%02x)\n", i, t, entry_name(e),
-           ENTRY_NODE(e), e);
+    printf("[N1] COMMIT idx=%d term=%d %s node=%d (0x%02x)%s\n", i, t, entry_name(e),
+           ENTRY_NODE(e), e, replayed ? " (replayed)" : "");
     any = true;
   }
 
@@ -323,46 +349,40 @@ static void *tick(void *arg)
     // Raft first, so the rest of the tick adds no jitter to REF. Sent in the
     // error state too: leadership and sync don't depend on failure mode.
     pthread_mutex_lock(&lock);
-    bool is_leader = raftnode_leader() == NODE_COCKPIT;
+    bool is_leader = raftnode_is_leader();
     uint8_t term = raftnode_term();
+    uint8_t ref_cycle = is_leader ? ++cycle : cycle; // continues the old leader's count
     pthread_mutex_unlock(&lock);
     if (is_leader)
-      send_ref(seq_ref++, term);
-    gpioWrite(LEADER_GPIO, is_leader);
-    gpioWrite(SYNC_GPIO, is_leader); // the leader's clock is global time by definition
+      send_ref(seq_ref++, term, ref_cycle);
 
     int64_t now = now_ms();
-    // A bus is degraded when we hear no other zone on it
-    bool bus_ok[2] = { false, false }, failed[2], other_fault = false;
+    struct node_seen seen[RAFT_N + 1];
 
     pthread_mutex_lock(&lock);
-    for (int z = 0; z < 2; z++) {
-      bool seen_a = now - last_hb_ms[z][0] <= HB_TIMEOUT_MS;
-      bool seen_b = now - last_hb_ms[z][1] <= HB_TIMEOUT_MS;
-      bus_ok[0] |= seen_a;
-      bus_ok[1] |= seen_b;
-      failed[z] = !seen_a && !seen_b;
-      other_fault |= zone_fault[z];
-    }
+    seen_locked(now, seen);
+    bool synced = is_leader || now - last_ref_ms <= HB_TIMEOUT_MS; // the leader's clock is global time
     bool test = test_fault;
     int64_t udp_age = now - last_udp_ms;
-    bool own_fault = test || udp_age > UDP_TIMEOUT_MS || raftnode_log_full(); // in HB_N1, so N2/N3 follow
+    // A bus is degraded when we hear no other zone on it
+    bool bus_ok[2] = { seen[NODE_COCKPIT].buses & 1, seen[NODE_COCKPIT].buses & 2 };
+    bool failed[2] = { !seen[2].up, !seen[3].up };
+    bool own_fault = seen[NODE_COCKPIT].fault;
+    bool other_fault = seen[2].fault || seen[3].fault;
     bool error = own_fault || other_fault || failed[0] || failed[1];
     int blink = error ? BLINK_HAZARD : blink_req;
 
-    // Raft: the keep-alive APPEND, and the leader logs what changed
-    // (COCKPIT_ERROR = our own fault, rule 3)
+    // Raft: the keep-alive APPEND. raft_poll() below does the rest (the
+    // leader logs network changes there)
     if (is_leader && ++append_ticks == RAFT_APPEND_MS / RAFT_HEARTBEAT_MS) {
       append_ticks = 0;
       raftnode_keepalive();
     }
-    if (is_leader && now - start_ms >= LOG_CHANGES_AFTER_MS) {
-      struct network want = network_seen(!own_fault, bus_ok, failed);
-      raftnode_log_network(&want);
-    }
     int route = route_locked(now);
     pthread_mutex_unlock(&lock);
     raft_poll();
+    gpioWrite(LEADER_GPIO, is_leader);
+    gpioWrite(SYNC_GPIO, synced);
 
     if (route != printed_route) {
       printf("[N1] ROUTE relay N2<->N3 %s\n",
@@ -411,9 +431,21 @@ static void *tick(void *arg)
   return NULL;
 }
 
+// Frames N1 sends itself. We hear them back only through a relaying STM32.
+static bool from_cockpit(const struct can_frame *f)
+{
+  canid_t id = f->can_id;
+  return id == CAN_ID_CTRL || id == CAN_ID_BLINK || id == CAN_ID_HB_N1 ||
+         id == CAN_ID_REF(NODE_COCKPIT) || id == CAN_ID_REQ_VOTE(NODE_COCKPIT) ||
+         id == CAN_ID_VOTE(NODE_COCKPIT) || id == CAN_ID_APPEND(NODE_COCKPIT) ||
+         id == CAN_ID_APPEND_ACK(NODE_COCKPIT) || id == CAN_ID_CLIENT(NODE_COCKPIT) ||
+         (id == CAN_ID_FAULT && f->data[1] == NODE_COCKPIT);
+}
+
 // Heartbeats and Raft frames from N2/N3, and FORCE forwarded to the proxy.
-// RELAY: while N2 and N3 share no bus, their HBs and FAULTs go to the other bus
-// unchanged (same ID and seq, so receivers dedup). Everything else N1 sends on both.
+// RELAY: while N2 and N3 share no bus, every frame of theirs goes to the other
+// bus unchanged (same ID and seq, so receivers dedup), REF, APPEND and votes
+// included: an STM32 leader may reach the other STM32 only through us.
 static void *can_rx(void *arg)
 {
   int udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -427,7 +459,11 @@ static void *can_rx(void *arg)
 
     if (recvfrom(can_fd, &f, sizeof(f), 0, (struct sockaddr *)&addr, &len) != sizeof(f))
       continue;
+    int64_t rx_us = now_us(); // first: REF's receive time
+    if (f.can_id & ~CAN_SFF_MASK)
+      continue; // extended, RTR or error frame: not in our catalog
     int bus = addr.can_ifindex == ifindex[0] ? 0 : 1;
+    bool fresh = is_new(f.can_id, f.data[0] & CAN_SEQ_MASK, rx_us / 1000);
 
     if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3) {
       int z = f.can_id - CAN_ID_HB_N2;
@@ -436,13 +472,13 @@ static void *can_rx(void *arg)
       zone_fault[z] = f.data[1];
       zone_buses[z] = f.data[2];
       pthread_mutex_unlock(&lock);
-    } else if (f.can_id == CAN_ID_FORCE) {
+    } else if (f.can_id == CAN_ID_FORCE && fresh) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
-    } else if (f.can_id < RAFT_IDS && is_new(f.can_id, f.data[0] & CAN_SEQ_MASK, now_ms())) {
-      on_raft_frame(f.can_id, f.data);
+    } else if (f.can_id < RAFT_IDS && fresh) {
+      on_raft_frame(f.can_id, f.data, rx_us);
     }
 
-    if (f.can_id == CAN_ID_HB_N2 || f.can_id == CAN_ID_HB_N3 || f.can_id == CAN_ID_FAULT) {
+    if (fresh && !from_cockpit(&f)) {
       pthread_mutex_lock(&lock);
       bool relay = route_locked(now_ms()) != 0;
       pthread_mutex_unlock(&lock);
@@ -480,21 +516,30 @@ static void *input(void *arg)
 }
 
 // PPS (Part 6.4): rising edge on every whole second of global time, then the
-// same print as the STM32s. While the Pi leads, its clock is global time, so
-// ratio 1 and no correction; that changes once it can follow another leader.
+// same print as the STM32s. We use no drift ratio (ratio 1, corr 0); step is
+// how far the last REF moved our clock (0 while we lead).
 static void *pps(void *arg)
 {
   while (!quit) {
-    int64_t next = (global_gettime() / 1000000 + 1) * 1000000;
-    int64_t at = next - global_offset_us; // the same instant on CLOCK_MONOTONIC
+    pthread_mutex_lock(&lock);
+    int64_t offset = global_offset_us;
+    pthread_mutex_unlock(&lock);
+    int64_t next = ((now_us() + offset) / 1000000 + 1) * 1000000;
+    int64_t at = next - offset; // the same instant on CLOCK_MONOTONIC
     struct timespec ts = { .tv_sec = at / 1000000, .tv_nsec = at % 1000000 * 1000 };
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
 
     gpioWrite(PPS_GPIO, 1);
     int64_t g = global_gettime(), l = now_us();
-    printf("[N1] PPS global=%lld.%06lld local=%lld.%06lld ratio=1.000000 corr=0us step=0us\n",
+    pthread_mutex_lock(&lock);
+    bool leading = raftnode_is_leader();
+    int64_t step = leading ? 0 : ref_step_us;
+    bool synced = leading || now_ms() - last_ref_ms <= HB_TIMEOUT_MS;
+    pthread_mutex_unlock(&lock);
+    printf("[N1] PPS global=%lld.%06lld local=%lld.%06lld ratio=1.000000 corr=0us step=%lldus%s\n",
            (long long)(g / 1000000), (long long)(g % 1000000),
-           (long long)(l / 1000000), (long long)(l % 1000000));
+           (long long)(l / 1000000), (long long)(l % 1000000), (long long)step,
+           synced ? "" : " (not synced)");
     usleep(PPS_HIGH_MS * 1000);
     gpioWrite(PPS_GPIO, 0);
   }
@@ -547,9 +592,8 @@ int main()
          "missed_heartbeats=%d jitter_ms=%d log_size=%d debug=%d\n",
          RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
          RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
-  raftnode_init(NODE_COCKPIT); // before the threads: they all use it
-  printf("N1 boot: term %d, leader %d\n", raftnode_term(), raftnode_leader());
-  start_ms = now_ms();
+  raftnode_init(NODE_COCKPIT, now_ms()); // before the threads: they all use it
+  printf("N1 boot: term %d, default leader %d\n", raftnode_term(), RAFT_DEFAULT_LEADER);
 
   pthread_create(&tick_tid, NULL, tick, NULL);
   pthread_create(&pps_tid, NULL, pps, NULL);

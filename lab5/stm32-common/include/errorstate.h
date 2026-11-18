@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "raftnode.h"
+
 /*
  * Error state, HB_TX, HB_MON and the test button (B1). In error while any
  * of: an own fault (test button, bad CTRL), another zone's HB reports a
@@ -29,5 +31,9 @@ void errorstate_ctrl_ok(void);
 
 /* Out-of-range CTRL: own fault, sends FAULT */
 void errorstate_bad_ctrl(void);
+
+/* What HB_MON knows of a node (ourselves: our own fault and bus view), for
+ * the Raft agent. Any thread */
+struct node_seen errorstate_seen(int node);
 
 #endif

@@ -49,6 +49,8 @@ static int wdt_channel;
 
 static atomic_t own_faults;
 static atomic_t zone_fault[4];		/* by zone id, from their heartbeats */
+static atomic_t zone_buses[4];		/* by zone id, HB byte 2 (their view of their buses) */
+static atomic_t own_buses;		/* our HB byte 2 */
 static atomic_t ctrl_seen;		/* a valid CTRL has arrived since boot */
 static atomic_t bad_ctrl_ms;
 static atomic_t last_press_ms;
@@ -157,7 +159,9 @@ static void hb_loop(void *p1, void *p2, void *p3)
 
 		update();
 
-		uint8_t hb[8] = { 0, atomic_get(&own_faults) != 0, bus_ok[BUS_A] | bus_ok[BUS_B] << 1 };
+		atomic_set(&own_buses, bus_ok[BUS_A] | bus_ok[BUS_B] << 1);
+
+		uint8_t hb[8] = { 0, atomic_get(&own_faults) != 0, atomic_get(&own_buses) };
 
 		canbus_send(HB_ID(NODE_ID), hb);
 
@@ -181,6 +185,18 @@ static void on_hb(const struct can_frame *f)
 	int zone = f->id - CAN_ID_HB_N1 + 1;
 
 	atomic_set(&zone_fault[zone], f->data[1]);
+	atomic_set(&zone_buses[zone], f->data[2]);
+}
+
+struct node_seen errorstate_seen(int node)
+{
+	if (node == NODE_ID) {
+		return (struct node_seen){ .up = true, .fault = atomic_get(&own_faults) != 0,
+					   .buses = atomic_get(&own_buses) };
+	}
+	return (struct node_seen){ .up = heard(node, BUS_A) || heard(node, BUS_B),
+				   .fault = atomic_get(&zone_fault[node]) != 0,
+				   .buses = atomic_get(&zone_buses[node]) };
 }
 
 /* One press enters, a second within 500 ms exits */

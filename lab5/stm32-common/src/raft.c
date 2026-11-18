@@ -17,14 +17,13 @@
 #include <zephyr/sys/printk.h>
 
 #include "canbus.h"
+#include "errorstate.h"
 #include "raft.h"
 #include "raftnode.h"
 #include "relay.h"
 
 /* Below the CAN, control and HB threads (1-3) */
 #define RAFT_PRIO K_PRIO_PREEMPT(4)
-
-#define HB_TIMEOUT_MS (RAFT_MISSED_HEARTBEATS * RAFT_HEARTBEAT_MS)
 
 /* The agent and the log (neither is thread-safe) */
 K_MUTEX_DEFINE(raft_lock);
@@ -58,6 +57,48 @@ static void on_client(const struct can_frame *f)
 	k_sem_give(&raft_sem);
 }
 
+static void on_req_vote(const struct can_frame *f)
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	raftnode_on_req_vote(f->id - CAN_ID_REQ_VOTE(0), f->data);
+	k_mutex_unlock(&raft_lock);
+	k_sem_give(&raft_sem);
+}
+
+static void on_vote(const struct can_frame *f)
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	raftnode_on_vote(f->id - CAN_ID_VOTE(0), f->data);
+	k_mutex_unlock(&raft_lock);
+	k_sem_give(&raft_sem);
+}
+
+bool raft_on_ref(int from, const uint8_t d[8])
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	bool follow = raftnode_on_ref(from, d);
+	k_mutex_unlock(&raft_lock);
+	k_sem_give(&raft_sem);	/* the election timer restarts on the next poll */
+	return follow;
+}
+
+bool raft_leading(uint8_t *term)
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	bool leading = raftnode_is_leader();
+	*term = raftnode_term();
+	k_mutex_unlock(&raft_lock);
+	return leading;
+}
+
+void raft_keepalive(void)
+{
+	k_mutex_lock(&raft_lock, K_FOREVER);
+	raftnode_keepalive();
+	k_mutex_unlock(&raft_lock);
+	k_sem_give(&raft_sem);
+}
+
 void raft_event(void)
 {
 	atomic_inc(&presses);
@@ -65,17 +106,6 @@ void raft_event(void)
 }
 
 /* ---- Raft thread ---- */
-
-/* Nodes whose HB we heard on either bus lately */
-static void heard_nodes(bool alive[RAFT_N + 1])
-{
-	for (int n = 1; n <= RAFT_N; n++) {
-		uint16_t hb = CAN_ID_HB_N1 + n - 1;
-
-		alive[n] = n == NODE_ID || canbus_ms_since(hb, BUS_A) <= HB_TIMEOUT_MS ||
-			   canbus_ms_since(hb, BUS_B) <= HB_TIMEOUT_MS;
-	}
-}
 
 /* Apply newly committed entries and print them, the same lines on every node */
 static void print_commits(void)
@@ -86,13 +116,14 @@ static void print_commits(void)
 		k_mutex_lock(&raft_lock, K_FOREVER);
 		uint16_t i = log_apply_next();
 		uint8_t t = log_term(i), e = log_entry(i);
+		bool replayed = raftnode_replayed(i);
 		k_mutex_unlock(&raft_lock);
 
 		if (i == 0) {
 			break;
 		}
-		printk("[N%d] COMMIT idx=%d term=%d %s node=%d (0x%02x)\n", NODE_ID, i, t,
-		       entry_name(e), ENTRY_NODE(e), e);
+		printk("[N%d] COMMIT idx=%d term=%d %s node=%d (0x%02x)%s\n", NODE_ID, i, t,
+		       entry_name(e), ENTRY_NODE(e), e, replayed ? " (replayed)" : "");
 		any = true;
 	}
 
@@ -116,21 +147,24 @@ static void raft_loop(void *p1, void *p2, void *p3)
 	int pressed = 0;	/* presses handed to the agent */
 
 	while (1) {
-		/* Woken by a frame or a press; the timeout drives retries */
+		/* Woken by a frame or a press; the timeout drives the election
+		 * timer and retries */
 		k_sem_take(&raft_sem, K_MSEC(RAFT_HEARTBEAT_MS));
 
 		struct raft_frame out[RAFT_FRAMES_MAX];
 		static char notes[384];
-		bool alive[RAFT_N + 1];
+		struct node_seen seen[RAFT_N + 1];
 		int presses_now = atomic_get(&presses);
 
-		heard_nodes(alive);
+		for (int n = 1; n <= RAFT_N; n++) {
+			seen[n] = errorstate_seen(n);
+		}
 
 		k_mutex_lock(&raft_lock, K_FOREVER);
 		for (; pressed < presses_now; pressed++) {
 			raftnode_event();
 		}
-		int count = raftnode_poll(k_uptime_get(), alive, out);
+		int count = raftnode_poll(k_uptime_get(), seen, out);
 		raftnode_notes(notes, sizeof(notes));
 		k_mutex_unlock(&raft_lock);
 
@@ -146,14 +180,16 @@ K_THREAD_DEFINE(raft_thread, 2048, raft_loop, NULL, NULL, NULL, RAFT_PRIO, 0, SY
 
 int raft_init(void)
 {
-	raftnode_init(NODE_ID);
+	raftnode_init(NODE_ID, k_uptime_get());
 
 	/* The other two nodes' Raft frames. The other STM32's also reach the Pi
 	 * through us when we relay (canbus receives only IDs with a handler) */
 	for (int n = 1; n <= RAFT_N; n++) {
 		if (n != NODE_ID && (canbus_on(CAN_ID_APPEND(n), on_append) != 0 ||
 				     canbus_on(CAN_ID_APPEND_ACK(n), on_ack) != 0 ||
-				     canbus_on(CAN_ID_CLIENT(n), on_client) != 0)) {
+				     canbus_on(CAN_ID_CLIENT(n), on_client) != 0 ||
+				     canbus_on(CAN_ID_REQ_VOTE(n), on_req_vote) != 0 ||
+				     canbus_on(CAN_ID_VOTE(n), on_vote) != 0)) {
 			return -ENOMEM;
 		}
 	}

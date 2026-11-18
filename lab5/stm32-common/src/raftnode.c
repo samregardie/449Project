@@ -5,6 +5,21 @@
  * the flags into frames. A flag holds at most one frame of each kind, so
  * the frame list can't overflow, and a newer reply simply replaces an older
  * one that hasn't gone out yet.
+ *
+ * Elections, the usual Raft rules plus three of ours:
+ * - Default leader (Part 2): everyone boots in term 1 following it, and a
+ *   follower's election timer only starts once it has heard a leader, so
+ *   STM32s that boot long before the Pi wait for it. The default leader
+ *   itself first listens for BOOT_WAIT_MS and leads only if it heard no REF:
+ *   a Pi that reboots joins the STM32 leader instead (checkoff 7).
+ * - Rule 8: for BOOT_WAIT_MS after boot a node neither votes nor runs. Its
+ *   term and vote are in RAM, so it first hears REF and learns the term.
+ * - Pre-vote (Raft thesis 9.6): on a timeout a node first asks "would you
+ *   vote for me in term+1?" without changing any term. Nodes that still hear
+ *   their leader say no. Only with a majority of yes does it really run. So
+ *   a node that merely lost the leader's REF for a moment (a jumper pulled,
+ *   relaying not started yet: checkoff 5) or is cut off (checkoff 10) never
+ *   raises the term and deposes a working leader.
  */
 
 #include <stdarg.h>
@@ -13,11 +28,17 @@
 
 #include "raftnode.h"
 
-#define CLIENT_RETRY_MS 100	/* resend an EVENT request until its OK */
+#define CLIENT_RETRY_MS 100		/* resend an EVENT request until its OK */
+#define BOOT_WAIT_MS RAFT_ELECTION_TIMEOUT_MIN_MS
+#define LOG_NETWORK_AFTER_MS 200	/* after boot: until then we haven't heard everyone */
+
+enum role { FOLLOWER, PRE_CANDIDATE, CANDIDATE, LEADER };
 
 static int me;
+static enum role role;
 static uint8_t term;
-static int leader;
+static int leader;			/* who we think leads, RAFT_NO_LEADER = don't know */
+static uint8_t voted_for;		/* in this term, 0 = nobody yet */
 static bool log_full;
 static int64_t now;			/* from the last raftnode_poll() */
 static bool alive[RAFT_N + 1];		/* from the last raftnode_poll() */
@@ -53,15 +74,56 @@ void raftnode_notes(char *buf, size_t size)
 	notes_len = 0;
 }
 
-static bool is_leader(void)
-{
-	return leader == me;
-}
-
 /* A node ID we can hear from: another node of the cluster */
 static bool is_peer(int node)
 {
 	return node >= 1 && node <= RAFT_N && node != me;
+}
+
+/* ---- Election timer ---- */
+
+static int64_t boot_ms;
+static bool booted;		/* BOOT_WAIT_MS has passed (rule 8) */
+static bool default_wait;	/* we are the default leader, still listening */
+static int64_t deadline;	/* start an election at this time; 0 = timer not running */
+static bool restart_timer;	/* heard our leader (or voted): restart on the next poll */
+static bool heard_leader;	/* our leader's REF since the last poll */
+static int64_t leader_ms;	/* when we last heard it (poll time) */
+static uint32_t rng;
+
+/* missed_heartbeats x heartbeat_ms + U(0, jitter), Part 2. A plain LCG, the
+ * same on every node, seeded with RAFT_SEED + node ID: the three timeouts
+ * differ, but a seed gives the same ones on every run */
+static int64_t random_timeout(void)
+{
+	rng = rng * 1103515245u + 12345u;
+	return RAFT_ELECTION_TIMEOUT_MIN_MS + (rng >> 16) % (RAFT_ELECTION_JITTER_MS + 1);
+}
+
+/* A newer term (from any frame): adopt it and become a follower, leader unknown */
+static void see_term(uint8_t t)
+{
+	if (t > term) {
+		term = t;
+		voted_for = 0;
+		role = FOLLOWER;
+		leader = RAFT_NO_LEADER;
+		restart_timer = true;
+	}
+}
+
+/* `from` leads term t (>= ours): follow it */
+static void follow(int from, uint8_t t)
+{
+	see_term(t);
+	role = FOLLOWER;	/* a candidate of this term gives up */
+	default_wait = false;
+	if (leader != from) {
+		leader = from;
+		if (RAFT_DEBUG) {
+			note("[N%d] RAFT follow N%d term=%d\n", me, from, term);
+		}
+	}
 }
 
 /* ---- Leader ---- */
@@ -73,7 +135,9 @@ static bool append_now;				/* send an APPEND on the next poll */
 /*
  * EVENT requests (rule 5). A retry repeats the request number, so a number
  * already taken is not appended again. Indexed by node ID, ourselves too:
- * the leader's own EVENTs go through the same path.
+ * the leader's own EVENTs go through the same path. In RAM only, so a new
+ * leader starts over (known limit: an EVENT the old leader appended but
+ * never OKed is appended again when its client retries).
  */
 static uint8_t last_req[RAFT_N + 1];	/* last request number taken from each node */
 static uint16_t event_index[RAFT_N + 1];	/* its log index until it commits, 0 = none */
@@ -88,6 +152,28 @@ static uint16_t leader_append(uint8_t entry)
 	}
 	append_now = true;	/* one APPEND per batch: the ACKs pull the rest */
 	return log_last_index();
+}
+
+static void become_leader(int votes)
+{
+	role = LEADER;
+	leader = me;
+	default_wait = false;
+	for (int n = 1; n <= RAFT_N; n++) {
+		next_index[n] = log_last_index() + 1;
+		match_index[n] = 0;
+		last_req[n] = 0;
+		event_index[n] = 0;
+		ok_pending[n] = false;
+	}
+	if (RAFT_DEBUG) {
+		if (votes == 0) {
+			note("[N%d] RAFT leader term=%d (default leader)\n", me, term);
+		} else {
+			note("[N%d] RAFT leader term=%d votes=%d\n", me, term, votes);
+		}
+	}
+	leader_append(ENTRY(ENTRY_LEADER, me));
 }
 
 /* A request to log an EVENT, from another node or from ourselves */
@@ -203,7 +289,11 @@ void raftnode_on_ack(int from, const uint8_t d[8])
 {
 	uint16_t match = d[3] | d[4] << 8;
 
-	if (!is_leader() || !is_peer(from)) {
+	if (!is_peer(from)) {
+		return;
+	}
+	see_term(d[1]);		/* a newer term: we were deposed */
+	if (role != LEADER || d[1] != term) {
 		return;
 	}
 
@@ -243,39 +333,201 @@ void raftnode_on_ack(int from, const uint8_t d[8])
 
 void raftnode_keepalive(void)
 {
-	if (is_leader()) {
+	if (role == LEADER) {
 		append_now = true;
 	}
 }
 
-void raftnode_log_network(const struct network *want)
+/*
+ * Raft client reports (rules 1-4), as the leader sees them. Every HB carries
+ * the sender's view of its own buses, which is the report: only a node's
+ * view of its OWN buses is reliable, since relayed HBs make others look
+ * present on a bus they're cut off from. A node we can't hear is down. The
+ * cockpit is ok while N1 is up and reports no fault (rule 3). Appends only
+ * what takes the log's newest network to this one: nothing if it already
+ * matches, so calling it every poll adds nothing (rule 1).
+ */
+static void log_network(const struct node_seen seen[RAFT_N + 1])
 {
-	if (!is_leader()) {
-		return;
+	struct network want = { .cockpit_ok = seen[NODE_COCKPIT].up && !seen[NODE_COCKPIT].fault };
+
+	for (int n = 1; n <= RAFT_N; n++) {
+		want.node_up[n] = seen[n].up;
+		want.link_up[n][0] = seen[n].up && (seen[n].buses & 1);
+		want.link_up[n][1] = seen[n].up && (seen[n].buses & 2);
 	}
 
 	struct network have = log_latest_network();
 	uint8_t entries[NETWORK_DIFF_MAX];
-	int count = network_diff(&have, want, entries);
+	int count = network_diff(&have, &want, entries);
 
 	for (int i = 0; i < count; i++) {
 		leader_append(entries[i]);
 	}
 }
 
+/* ---- Votes ---- */
+
+static uint8_t votes;		/* candidate: bit n = node n voted for us */
+static bool request_votes;	/* candidate: send REQ_VOTE on the next poll */
+
+/* Our reply to the latest REQ_VOTE, with the term it was decided in */
+static struct {
+	bool pending;
+	bool pre;
+	uint8_t term;
+	uint8_t candidate;
+	bool granted;
+} vote_reply;
+
+static int count_bits(uint8_t bits)
+{
+	int count = 0;
+
+	for (int n = 1; n <= RAFT_N; n++) {
+		count += (bits >> n) & 1;
+	}
+	return count;
+}
+
+/* Election timeout: ask whether we could win term+1. Repeats every timeout
+ * while nobody says yes (printed once) */
+static void start_prevote(void)
+{
+	if (RAFT_DEBUG && role != PRE_CANDIDATE) {
+		note("[N%d] RAFT timeout -> pre-vote term=%d\n", me, term + 1);
+	}
+	role = PRE_CANDIDATE;
+	votes = 1 << me;
+	request_votes = true;
+	deadline = now + random_timeout();
+}
+
+/* A majority would vote for us: a new term, vote for ourselves, ask the others */
+static void start_election(void)
+{
+	term++;
+	role = CANDIDATE;
+	leader = RAFT_NO_LEADER;
+	voted_for = me;
+	votes = 1 << me;
+	request_votes = true;
+	restart_timer = true;	/* no winner by then: pre-vote again */
+	if (RAFT_DEBUG) {
+		note("[N%d] RAFT candidate term=%d\n", me, term);
+	}
+}
+
+static bool log_up_to_date(uint16_t their_last, uint8_t their_last_term)
+{
+	uint16_t last = log_last_index();
+
+	return their_last_term > log_term(last) ||
+	       (their_last_term == log_term(last) && their_last >= last);
+}
+
+/*
+ * REQ_VOTE (catalog.h): seq, term, last log index (2), last log term, pre.
+ * Only to a candidate whose log is at least as up to date as ours (newer
+ * last term, or same term and at least as long), so a leader always has
+ * every committed entry.
+ * - Pre-vote: yes if the term is newer and we no longer hear a leader
+ *   ourselves. Changes nothing here.
+ * - Vote: at most one per term.
+ */
+void raftnode_on_req_vote(int from, const uint8_t d[8])
+{
+	bool pre = d[5], grant;
+	bool up_to_date = log_up_to_date(d[2] | d[3] << 8, d[4]);
+
+	if (!is_peer(from) || !booted) {
+		return;		/* rule 8: no vote right after boot */
+	}
+
+	if (pre) {
+		bool leader_alive = role == LEADER || now - leader_ms < RAFT_ELECTION_TIMEOUT_MIN_MS;
+
+		grant = d[1] > term && up_to_date && !leader_alive;
+	} else {
+		see_term(d[1]);
+		grant = d[1] == term && (voted_for == 0 || voted_for == from) && up_to_date;
+		if (grant) {
+			voted_for = from;
+			restart_timer = true;	/* give it time to win */
+		}
+	}
+
+	vote_reply.pending = true;
+	vote_reply.pre = pre;
+	vote_reply.term = pre ? d[1] : term;
+	vote_reply.candidate = from;
+	vote_reply.granted = grant;
+	if (RAFT_DEBUG && (grant || !pre)) {	/* refused pre-votes would only be noise */
+		note("[N%d] RAFT %s N%d term=%d %s\n", me, pre ? "pre-vote" : "vote", from,
+		     vote_reply.term, grant ? "yes" : "no");
+	}
+}
+
+/* VOTE (catalog.h): seq, term, candidate ID, granted (0/1), pre */
+void raftnode_on_vote(int from, const uint8_t d[8])
+{
+	bool pre = d[4], yes_for_us = d[2] == me && d[3];
+
+	if (!is_peer(from)) {
+		return;
+	}
+
+	if (pre) {
+		if (yes_for_us && role == PRE_CANDIDATE && d[1] == term + 1) {
+			votes |= 1 << from;
+			if (count_bits(votes) >= RAFT_MAJORITY) {
+				start_election();
+			}
+		}
+		return;
+	}
+
+	see_term(d[1]);		/* even a refusal can tell us of a newer term */
+	if (yes_for_us && role == CANDIDATE && d[1] == term) {
+		votes |= 1 << from;
+		if (count_bits(votes) >= RAFT_MAJORITY) {
+			become_leader(count_bits(votes));
+		}
+	}
+}
+
 /* ---- Follower ---- */
 
 /* The reply to the latest APPEND. If two APPENDs arrive before a poll, only
- * the newer reply goes out: it describes our log as it is now */
+ * the newer reply goes out: it describes our log as it is now. It keeps the
+ * term it was decided in, so it can't be read as a reply in a later term */
 static struct {
 	bool pending;
+	uint8_t term;
 	bool ok;
 	uint16_t match;
 } reply;
 
+/* Entries up to here were committed before we had them (raftnode_replayed) */
+static int replayed_until;
+
+/* REF (catalog.h): seq, term, cycle, leader time. The Raft heartbeat: only
+ * our leader's REF restarts the election timer */
+bool raftnode_on_ref(int from, const uint8_t d[8])
+{
+	if (!is_peer(from) || d[1] < term) {
+		return false;	/* a stale leader's */
+	}
+	follow(from, d[1]);
+	heard_leader = true;
+	restart_timer = true;
+	return true;
+}
+
 /*
  * APPEND (catalog.h). The usual Raft follower rules:
- * - An older term is a stale leader: refuse.
+ * - An older term is a stale leader: refuse (our reply carries our term,
+ *   which deposes it).
  * - Our log must hold the leader's entry at prev (same term), or the new
  *   entry would not fit. If it doesn't, drop the conflicting entry at prev
  *   and everything after, and tell the leader how far we do fit.
@@ -287,6 +539,7 @@ void raftnode_on_append(int from, const uint8_t d[8])
 {
 	uint16_t prev = d[2] | d[3] << 8;
 	uint8_t prev_term = d[4], entry_term = d[5], distance = d[6], entry = d[7];
+	int leader_commit = prev + 1 - distance;	/* >= 0 from a correct leader */
 	bool ok = false;
 
 	if (!is_peer(from)) {
@@ -294,8 +547,14 @@ void raftnode_on_append(int from, const uint8_t d[8])
 	}
 
 	if (d[1] >= term) {
-		term = d[1];
-		leader = from;
+		follow(from, d[1]);
+
+		/* The leader committed past the end of our log: whatever we get up to
+		 * there was committed without us, so it prints as replayed */
+		if (leader_commit > log_last_index() && leader_commit > replayed_until) {
+			replayed_until = leader_commit;
+		}
+
 		ok = prev <= log_last_index() && log_term(prev) == prev_term;
 
 		if (!ok && prev <= log_last_index()) {
@@ -314,15 +573,20 @@ void raftnode_on_append(int from, const uint8_t d[8])
 
 	if (ok) {
 		reply.match = (entry != ENTRY_NONE) ? prev + 1 : prev;
-
-		int commit = prev + 1 - distance;
-
-		log_set_commit(commit < reply.match ? commit : reply.match);
+		if (leader_commit > 0) {	/* a negative one would wrap to "everything" */
+			log_set_commit(leader_commit < reply.match ? leader_commit : reply.match);
+		}
 	} else {
 		reply.match = log_last_index();
 	}
 	reply.ok = ok;
+	reply.term = term;
 	reply.pending = true;
+}
+
+bool raftnode_replayed(uint16_t index)
+{
+	return index <= replayed_until;
 }
 
 /* ---- Client ---- */
@@ -365,7 +629,7 @@ void raftnode_on_client(int from, const uint8_t d[8])
 		if (!entry_valid(d[3]) || ENTRY_TYPE(d[3]) != ENTRY_EVENT || ENTRY_NODE(d[3]) != from) {
 			return;
 		}
-		if (is_leader()) {
+		if (role == LEADER) {
 			take_request(from, d[3], d[4]);
 		} else {
 			redirect.pending = true;
@@ -421,11 +685,11 @@ static int poll_event(struct raft_frame *f)
 
 	uint8_t entry = ENTRY(ENTRY_EVENT, me);
 
-	if (is_leader()) {
+	if (role == LEADER) {
 		take_request(me, entry, req);
 		return 0;
 	}
-	if (leader == RAFT_NO_LEADER) {
+	if (leader == RAFT_NO_LEADER || leader == me) {
 		return 0;	/* nobody to ask yet: retried later */
 	}
 	client_frame(f, CLIENT_REQUEST, leader, entry, req);
@@ -434,39 +698,104 @@ static int poll_event(struct raft_frame *f)
 
 /* ---- Poll ---- */
 
-void raftnode_init(int node)
+void raftnode_init(int node, int64_t now_ms)
 {
 	raftlog_init();
 	me = node;
-	/* With a default leader every node boots in term 1 with it (Part 2) */
-	term = RAFT_DEFAULT_LEADER != RAFT_NO_LEADER ? 1 : 0;
-	leader = RAFT_DEFAULT_LEADER;
+	boot_ms = now_ms;
+	rng = RAFT_SEED + me;
+	role = FOLLOWER;
 	for (int n = 0; n <= RAFT_N; n++) {
 		next_index[n] = 1;
 	}
+
+	if (RAFT_DEFAULT_LEADER != RAFT_NO_LEADER) {
+		/* Part 2: everyone boots in term 1 with the default leader, no
+		 * election. The timer starts once we hear it (deadline 0 until then) */
+		term = 1;
+		leader = RAFT_DEFAULT_LEADER;
+		default_wait = me == RAFT_DEFAULT_LEADER;
+	} else {
+		deadline = now_ms + BOOT_WAIT_MS + random_timeout();
+	}
 }
 
-int raftnode_poll(int64_t now_ms, const bool heard[RAFT_N + 1],
+/* The election timer, in every poll */
+static void poll_election(void)
+{
+	if (!booted && now - boot_ms >= BOOT_WAIT_MS) {
+		booted = true;
+		if (default_wait) {
+			become_leader(0);	/* the default leader, and no REF heard: lead */
+		}
+	}
+
+	if (heard_leader) {
+		heard_leader = false;
+		leader_ms = now;
+	}
+	if (role == LEADER) {
+		return;		/* leaders don't time out */
+	}
+	if (restart_timer) {
+		restart_timer = false;
+		deadline = now + random_timeout();
+	}
+	if (booted && deadline != 0 && now >= deadline) {
+		start_prevote();
+	}
+}
+
+int raftnode_poll(int64_t now_ms, const struct node_seen seen[RAFT_N + 1],
 		  struct raft_frame out[RAFT_FRAMES_MAX])
 {
 	int count = 0;
 
 	now = now_ms;
-	memcpy(alive, heard, sizeof(alive));
+	for (int n = 1; n <= RAFT_N; n++) {
+		alive[n] = seen[n].up;
+	}
+
+	poll_election();
 
 	/* APPEND_ACK (catalog.h): seq, term, success (0/1), match index (2).
 	 * First: the leader is waiting for it */
 	if (reply.pending) {
-		uint8_t ack[8] = { 0, term, reply.ok, reply.match & 0xFF, reply.match >> 8 };
+		uint8_t ack[8] = { 0, reply.term, reply.ok, reply.match & 0xFF, reply.match >> 8 };
 
 		reply.pending = false;
 		out[count].id = CAN_ID_APPEND_ACK(me);
 		memcpy(out[count++].data, ack, 8);
 	}
 
+	/* VOTE (catalog.h): seq, term, candidate ID, granted, pre */
+	if (vote_reply.pending) {
+		uint8_t vote[8] = { 0, vote_reply.term, vote_reply.candidate, vote_reply.granted,
+				    vote_reply.pre };
+
+		vote_reply.pending = false;
+		out[count].id = CAN_ID_VOTE(me);
+		memcpy(out[count++].data, vote, 8);
+	}
+
+	/* REQ_VOTE (catalog.h): seq, term, last log index (2), last log term, pre.
+	 * A pre-vote asks about the term we would run in */
+	if (request_votes) {
+		bool pre = role == PRE_CANDIDATE;
+		uint16_t last = log_last_index();
+		uint8_t req[8] = { 0, pre ? term + 1 : term, last & 0xFF, last >> 8, log_term(last),
+				   pre };
+
+		request_votes = false;
+		if (pre || role == CANDIDATE) {
+			out[count].id = CAN_ID_REQ_VOTE(me);
+			memcpy(out[count++].data, req, 8);
+		}
+	}
+
 	if (redirect.pending) {
 		redirect.pending = false;
-		if (!is_leader() && leader != RAFT_NO_LEADER) {
+		if (role != LEADER && leader != RAFT_NO_LEADER) {
 			client_frame(&out[count++], CLIENT_REDIRECT, redirect.client, leader,
 				     redirect.req);
 		}
@@ -476,7 +805,11 @@ int raftnode_poll(int64_t now_ms, const bool heard[RAFT_N + 1],
 	struct raft_frame request;
 	int requested = poll_event(&request);
 
-	if (is_leader()) {
+	if (role == LEADER) {
+		if (now - boot_ms >= LOG_NETWORK_AFTER_MS) {
+			log_network(seen);
+		}
+
 		if (append_now) {
 			append_now = false;
 			build_append(&out[count++]);
@@ -512,9 +845,9 @@ uint8_t raftnode_term(void)
 	return term;
 }
 
-int raftnode_leader(void)
+bool raftnode_is_leader(void)
 {
-	return leader;
+	return role == LEADER;
 }
 
 bool raftnode_log_full(void)

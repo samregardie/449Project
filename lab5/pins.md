@@ -8,7 +8,7 @@ Update this file whenever an overlay changes.
 
 | Signal | Pi, N1 (BCM, header pin) | N2 front and N3 rear (same pins on both) | What it shows |
 |---|---|---|---|
-| LEADER LED | GPIO16 (36) | PA15 (CN7 pin 17) | High while this node is the Raft leader. STM32: not driven until elections exist |
+| LEADER LED | GPIO16 (36) | PA15 (CN7 pin 17) | High while this node is the Raft leader |
 | SYNC LED | GPIO20 (38) | PD2 (CN7 pin 4) | High while this node's clock follows global time (always on the leader) |
 | REF_RX | - (Pi leads for now) | PB7 (CN7 pin 21) | Toggles on every REF received |
 | PPS | GPIO23 (16) | PC3 (CN7 pin 37) | Rising edge on every whole second of global time, high 
