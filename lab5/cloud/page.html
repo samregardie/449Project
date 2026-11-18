@@ -121,12 +121,8 @@
     return td;
   }
 
-  // Log entry names as the nodes print them -> words for the page
-  const ENTRY_TEXT = {
-    COCKPIT_OK: 'Cockpit OK', COCKPIT_ERROR: 'Cockpit error', NODE_UP: 'Node up', NODE_DOWN: 'Node down',
-    LINK_A_UP: 'Bus A link up', LINK_A_DOWN: 'Bus A link down', LINK_B_UP: 'Bus B link up',
-    LINK_B_DOWN: 'Bus B link down', EVENT: 'Button press', LEADER: 'Became leader',
-  };
+  // The names the consoles print; node and link changes are the handout's MEMBER entries
+  const entryName = type => /^(NODE|LINK)_/.test(type) ? 'MEMBER ' + type : type;
 
   // errors: the Pi's reasons, each starting with its node ("N3 self-test")
   function nodeRow(n, leader, errors) {
@@ -192,9 +188,7 @@
     const log = s.log.map(e => {
       const tr = el('tr'), tag = el('td');
       if (e.replayed === '1') tag.append(el('span', 'tag role', 'replayed'));
-      const entry = el('td', '', ENTRY_TEXT[e.type] || e.type);
-      entry.title = e.type; // the name the consoles print, on hover
-      tr.append(el('td', '', e.index), el('td', '', e.term), entry,
+      tr.append(el('td', '', e.index), el('td', '', e.term), el('td', '', entryName(e.type)),
                 el('td', '', 'N' + e.node), el('td', '', clock(e.global_us, true)), tag);
       return tr;
     });
