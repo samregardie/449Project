@@ -15,5 +15,6 @@ endforeach()
 set(COMMON ${CMAKE_CURRENT_SOURCE_DIR}/../stm32-common)
 
 target_sources(app PRIVATE src/main.c src/drive.c src/motor.c src/encoder.c ${COMMON}/src/canbus.c ${COMMON}/src/relay.c
-	${COMMON}/src/ctrl.c ${COMMON}/src/errorstate.c ${COMMON}/src/blinker.c)
+	${COMMON}/src/ctrl.c ${COMMON}/src/errorstate.c ${COMMON}/src/blinker.c
+	${COMMON}/src/globaltime.c ${COMMON}/src/raftlog.c ${COMMON}/src/raft.c)
 target_include_directories(app PRIVATE include ${COMMON}/include)

@@ -144,6 +144,12 @@
 		/* Morpho CN7 pin 35 */
 		relay-tx-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;
 
+		/* Lab 5, morpho CN7 pins 4, 17, 21, 37 (same on both nodes) */
+		sync-gpios = <&gpiod 2 GPIO_ACTIVE_HIGH>;
+		leader-gpios = <&gpioa 15 GPIO_ACTIVE_HIGH>;
+		ref-rx-gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+		pps-gpios = <&gpioc 3 GPIO_ACTIVE_HIGH>;
+
 		/* Motor period (20 kHz) is a placeholder */
 		pwms = <&pwm1 3 PWM_USEC(50) PWM_POLARITY_NORMAL>,
 		       <&pwm3 2 PWM_USEC(50) PWM_POLARITY_NORMAL>;

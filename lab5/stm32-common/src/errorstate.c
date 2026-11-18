@@ -14,6 +14,7 @@
 
 #include "canbus.h"
 #include "errorstate.h"
+#include "raft.h"
 
 #define HB_PERIOD_MS 20
 #define DEBOUNCE_MS 50
@@ -91,8 +92,8 @@ static void update(void)
  */
 static void print_status(void)
 {
-	static char last[128];
-	char line[128];
+	static char last[192];
+	char line[192];
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	bool error = in_error;
 
@@ -108,6 +109,20 @@ static void print_status(void)
 			n += snprintk(line + n, sizeof(line) - n, " | N%d heard A=%d B=%d fault=%d", z,
 				      heard(z, BUS_A), heard(z, BUS_B),
 				      (int)atomic_get(&zone_fault[z]));
+		}
+	}
+
+	/*
+	 * Our own controllers, only when something is wrong beyond a cut bus:
+	 * "stopped" (a restart after a failed send didn't take) or "bus-off".
+	 * Not "passive": on a cut bus it flips between passive and active with
+	 * every controller restart, which reprinted this line every second.
+	 */
+	for (int b = 0; b < BUS_COUNT; b++) {
+		const char *state = canbus_state(b);
+
+		if (strcmp(state, "stopped") == 0 || strcmp(state, "bus-off") == 0) {
+			n += snprintk(line + n, sizeof(line) - n, " | can %c=%s", 'A' + b, state);
 		}
 	}
 
@@ -184,6 +199,7 @@ static void test_pressed(void)
 
 	atomic_set(&last_press_ms, now);
 	update();
+	raft_event();	/* every press is also an EVENT in the log */
 }
 
 /* ISR on both edges: a press counts only after 50 ms with no edges (bounce) */
@@ -210,6 +226,12 @@ int errorstate_init(errorstate_cb_t cb)
 	hwinfo_clear_reset_cause();
 	printk("N%d boot, reset cause 0x%x%s\n", NODE_ID, cause,
 	       (cause & RESET_WATCHDOG) ? " (WATCHDOG)" : "");
+
+	/* Same line as the Pi's (receiver.c): at checkoff, proof all three nodes match */
+	printk("N%d config: N=%d default_leader=%d seed=%d heartbeat_ms=%d append_ms=%d "
+	       "missed_heartbeats=%d jitter_ms=%d log_size=%d debug=%d\n",
+	       NODE_ID, RAFT_N, RAFT_DEFAULT_LEADER, RAFT_SEED, RAFT_HEARTBEAT_MS, RAFT_APPEND_MS,
+	       RAFT_MISSED_HEARTBEATS, RAFT_ELECTION_JITTER_MS, RAFT_LOG_SIZE, RAFT_DEBUG);
 
 	if (gpio_pin_configure_dt(&deg[BUS_A], GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&deg[BUS_B], GPIO_OUTPUT_INACTIVE) != 0 ||
