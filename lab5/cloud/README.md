@@ -12,7 +12,7 @@ log entries and a heartbeat to Redis over Tailscale; Tailscale Funnel serves the
 
 Deploy or update, from your laptop on the tailnet:
 ```sh
-scp -r lab5/cloud ubuntu@vehicle-mirror:
-ssh ubuntu@vehicle-mirror 'sudo sh cloud/setup.sh'
+scp -r lab5/cloud ubuntu@449-car:
+ssh ubuntu@449-car 'sudo sh cloud/setup.sh'
 ```
 First time only: create `/etc/vehicle-gui.env` on the VM from `env.example`.
