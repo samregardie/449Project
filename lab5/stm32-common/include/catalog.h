@@ -18,8 +18,9 @@
  * 0x011+n    REF_Nn         leader     20 ms                      term, cycle counter,
  *                                                                 leader time in us (5 bytes)
  * 0x018+n    REQ_VOTE_Nn    candidate  election only              term, last log index (2),
- *                                                                 last log term
- * 0x01C+n    VOTE_Nn        voter      reply to REQ_VOTE          term, candidate ID, granted (0/1)
+ *                                                                 last log term, pre (0/1)
+ * 0x01C+n    VOTE_Nn        voter      reply to REQ_VOTE          term, candidate ID, granted (0/1),
+ *                                                                 pre (0/1)
  * 0x020      FAULT          any        on a fault                 zone ID, reason (FAULT_*)
  * 0x040+n    APPEND_Nn      leader     100 ms, or a new entry     term, prev index (2), prev term,
  *                                                                 entry term, commit distance, entry
@@ -41,6 +42,8 @@
  * CLIENT request number: the sender counts up once per new request and
  * repeats the number on a retry, so the leader can drop the repeat.
  * BLINK is state only: the STM32s time the lamps from global time.
+ * pre = 1: a pre-vote ("would you vote for me in this term?"), which changes
+ * no term or vote; see raftnode.c.
  */
 #ifndef CATALOG_H
 #define CATALOG_H
@@ -103,6 +106,10 @@ enum client_kind {
  *   0x7n LINK_B_UP n       addLink(n, B)
  *   0x8n LINK_B_DOWN n     dropLink(n, B)
  *   0x9n EVENT from n
+ *   0xAn LEADER n          n won an election; no change to the network. A new
+ *                          leader appends it once, so it has an entry of its own
+ *                          term to commit (Raft commits older-term entries only
+ *                          along with one of the current term)
  */
 enum entry_type {
 	ENTRY_NONE,		/* no entry (empty APPEND) */
@@ -115,6 +122,7 @@ enum entry_type {
 	ENTRY_LINK_B_UP,
 	ENTRY_LINK_B_DOWN,
 	ENTRY_EVENT,
+	ENTRY_LEADER,
 };
 
 #define ENTRY(type, node)	(((type) << 4) | (node))
@@ -131,7 +139,7 @@ static inline bool entry_valid(uint8_t e)
 		return node == 0;
 	}
 
-	return type >= ENTRY_NODE_UP && type <= ENTRY_EVENT && node >= 1 && node <= RAFT_N;
+	return type >= ENTRY_NODE_UP && type <= ENTRY_LEADER && node >= 1 && node <= RAFT_N;
 }
 
 #endif

@@ -91,7 +91,7 @@ static void apply(struct network *n, uint8_t entry)
 		drop_link(n, node, 1);
 		break;
 	default:
-		break;	/* EVENT: recorded in the log, no change to the network */
+		break;	/* EVENT, LEADER: recorded in the log, no change to the network */
 	}
 }
 
@@ -270,10 +270,11 @@ const char *entry_name(uint8_t entry)
 		[ENTRY_LINK_B_UP] = "LINK_B_UP",
 		[ENTRY_LINK_B_DOWN] = "LINK_B_DOWN",
 		[ENTRY_EVENT] = "EVENT",
+		[ENTRY_LEADER] = "LEADER",
 	};
 	uint8_t type = ENTRY_TYPE(entry);
 
-	return type <= ENTRY_EVENT ? names[type] : "INVALID";
+	return type <= ENTRY_LEADER ? names[type] : "INVALID";
 }
 
 void network_format(const struct network *n, char *buf, size_t size)

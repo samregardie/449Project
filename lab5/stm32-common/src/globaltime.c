@@ -6,6 +6,11 @@
  * Drift ratio = leader time elapsed / local time elapsed, over ~1 s windows
  * (one 20 ms interval is too short: timestamp jitter would swamp it). The
  * ratio starts at 1 and is only replaced by a window that looks plausible.
+ * Only our Raft leader's REF counts (raft_on_ref()).
+ *
+ * Time master: when we lead, the master thread sends REF every 20 ms with
+ * our global_gettime(). It was synced to the old leader and keeps running
+ * at the last drift ratio, so global time doesn't step at the handover.
  */
 
 #include <stdlib.h>
@@ -18,6 +23,7 @@
 
 #include "canbus.h"
 #include "globaltime.h"
+#include "raft.h"
 
 /*
  * Leader reads its clock -> we timestamp the REF. ~270 us is the frame time
@@ -40,11 +46,15 @@
 /* Below the CAN and control threads (1-3): it only prints */
 #define PPS_PRIO K_PRIO_PREEMPT(5)
 
+/* Just below dispatch (1), so REF goes out on time */
+#define MASTER_PRIO K_PRIO_PREEMPT(2)
+
 #define USER_NODE DT_PATH(zephyr_user)
 
 static const struct gpio_dt_spec sync_led = GPIO_DT_SPEC_GET(USER_NODE, sync_gpios);
 static const struct gpio_dt_spec ref_rx = GPIO_DT_SPEC_GET(USER_NODE, ref_rx_gpios);
 static const struct gpio_dt_spec pps = GPIO_DT_SPEC_GET(USER_NODE, pps_gpios);
+static const struct gpio_dt_spec leader_led = GPIO_DT_SPEC_GET(USER_NODE, leader_gpios);
 
 /* Shared by the CAN dispatch thread, timer ISRs and any global_gettime() caller */
 static struct k_spinlock lock;
@@ -55,6 +65,7 @@ static int64_t step_us;			/* how far the last REF moved the clock */
 static int64_t win_leader, win_local;	/* start of the current drift window */
 static int64_t leader_span = 1;		/* last accepted window: ratio = leader_span */
 static int64_t local_span = 1;		/*                              / local_span */
+static uint8_t cycle;			/* REF cycle counter, last heard or sent */
 
 /* Local clock in us, never stepped */
 static int64_t local_us(void)
@@ -96,7 +107,8 @@ int64_t global_gettime(void)
 	return t;
 }
 
-/* No REF for SYNC_LOST_MS: keep running on the last drift ratio */
+/* No REF for SYNC_LOST_MS: keep running on the last drift ratio.
+ * (Never while we lead: the master thread keeps restarting the timer) */
 static void sync_lost(struct k_timer *timer)
 {
 	K_SPINLOCK(&lock) {
@@ -114,6 +126,10 @@ static void on_ref(const struct can_frame *f)
 	int64_t leader = 0;
 
 	gpio_pin_toggle_dt(&ref_rx);
+
+	if (!raft_on_ref(f->id - CAN_ID_REF(0), f->data)) {
+		return;		/* not our leader's: a stale leader's, or one from an old term */
+	}
 
 	for (int i = 0; i < 5; i++) {
 		leader |= (int64_t)f->data[3 + i] << (8 * i);
@@ -149,6 +165,7 @@ static void on_ref(const struct can_frame *f)
 		sys_clock_settime(SYS_CLOCK_REALTIME, &ts);
 		set_at = target;
 		synced = true;
+		cycle = f->data[2];
 	}
 
 	gpio_pin_set_dt(&sync_led, 1);
@@ -215,21 +232,75 @@ static void pps_loop(void *p1, void *p2, void *p3)
 
 K_THREAD_DEFINE(pps_thread, 1024, pps_loop, NULL, NULL, NULL, PPS_PRIO, 0, SYS_FOREVER_MS);
 
+/*
+ * Time master, every RAFT_HEARTBEAT_MS: while we lead, send REF and every
+ * RAFT_APPEND_MS the keep-alive APPEND; drive the LEADER LED either way.
+ * REF (catalog.h): seq, term, cycle, global time in us (5 bytes). The time is
+ * read last, right before sending: anything after it is sync error.
+ */
+static void master_loop(void *p1, void *p2, void *p3)
+{
+	struct k_timer timer;
+	int ticks = 0;
+
+	k_timer_init(&timer, NULL, NULL);
+	k_timer_start(&timer, K_MSEC(RAFT_HEARTBEAT_MS), K_MSEC(RAFT_HEARTBEAT_MS));
+
+	while (1) {
+		k_timer_status_sync(&timer);
+
+		uint8_t term;
+		bool leading = raft_leading(&term);
+
+		gpio_pin_set_dt(&leader_led, leading);
+		if (!leading) {
+			ticks = 0;
+			continue;
+		}
+
+		uint8_t d[8] = { 0, term };
+		int64_t t;
+
+		K_SPINLOCK(&lock) {
+			d[2] = ++cycle;	/* continues the old leader's count */
+			synced = true;	/* the leader's clock is global time */
+			t = global_locked();
+		}
+		for (int i = 0; i < 5; i++) {
+			d[3 + i] = t >> (8 * i);
+		}
+		canbus_send(CAN_ID_REF(NODE_ID), d);
+
+		gpio_pin_set_dt(&sync_led, 1);
+		k_timer_start(&sync_timer, K_MSEC(SYNC_LOST_MS), K_NO_WAIT);
+
+		if (++ticks == RAFT_APPEND_MS / RAFT_HEARTBEAT_MS) {
+			ticks = 0;
+			raft_keepalive();
+		}
+	}
+}
+
+K_THREAD_DEFINE(master_thread, 1024, master_loop, NULL, NULL, NULL, MASTER_PRIO, 0,
+		SYS_FOREVER_MS);
+
 int globaltime_init(void)
 {
 	if (gpio_pin_configure_dt(&sync_led, GPIO_OUTPUT_INACTIVE) != 0 ||
+	    gpio_pin_configure_dt(&leader_led, GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&ref_rx, GPIO_OUTPUT_INACTIVE) != 0 ||
 	    gpio_pin_configure_dt(&pps, GPIO_OUTPUT_INACTIVE) != 0) {
 		return -EIO;
 	}
 
-	/* Follow whichever node leads */
+	/* Every other node's REF: raft_on_ref() picks our leader's */
 	for (int n = 1; n <= RAFT_N; n++) {
-		if (canbus_on(CAN_ID_REF(n), on_ref) != 0) {
+		if (n != NODE_ID && canbus_on(CAN_ID_REF(n), on_ref) != 0) {
 			return -ENOMEM;
 		}
 	}
 
 	k_thread_start(pps_thread);
+	k_thread_start(master_thread);
 	return 0;
 }
