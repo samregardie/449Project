@@ -95,6 +95,8 @@ def state():
         "nodes": nodes,
         "relays": relays(nodes),
         "cockpit": cockpit,
+        # Why the vehicle is in the error state, from the Pi's live view: ["N3 self-test", ...]
+        "errors": [e for e in last_heartbeat.get("errors", "").split(", ") if e],
         "leader": int(last_heartbeat.get("leader", 0)),  # 0 = unknown
         "term": int(entries[0]["term"]) if entries else None,
         "global_us": int(last_heartbeat["global_us"]) if last_heartbeat else None,

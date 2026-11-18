@@ -20,7 +20,8 @@ void publisher_start(void);
 void publisher_commit(uint16_t index, uint8_t term, uint8_t entry, bool replayed,
                       int64_t global_us);
 
-// What the next heartbeat reports, from tick() once a second
-void publisher_status(int64_t global_us, int leader, const char *network);
+// What the next heartbeat reports, from tick() once a second. `errors` says
+// why we are in the error state ("" = not in error).
+void publisher_status(int64_t global_us, int leader, const char *network, const char *errors);
 
 #endif

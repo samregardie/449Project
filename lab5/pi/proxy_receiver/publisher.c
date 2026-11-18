@@ -49,6 +49,7 @@ static int q_head, q_count;
 static int64_t status_global_us;
 static int status_leader;
 static char status_network[96];
+static char status_errors[96];
 
 // Only the publisher thread uses these
 static const char *host, *password;
@@ -69,12 +70,13 @@ void publisher_commit(uint16_t index, uint8_t term, uint8_t entry, bool replayed
   pthread_mutex_unlock(&q_lock);
 }
 
-void publisher_status(int64_t global_us, int leader, const char *network)
+void publisher_status(int64_t global_us, int leader, const char *network, const char *errors)
 {
   pthread_mutex_lock(&q_lock);
   status_global_us = global_us;
   status_leader = leader;
   snprintf(status_network, sizeof(status_network), "%s", network);
+  snprintf(status_errors, sizeof(status_errors), "%s", errors);
   pthread_mutex_unlock(&q_lock);
 }
 
@@ -188,12 +190,13 @@ static bool send_heartbeat(void)
   pthread_mutex_lock(&q_lock);
   long long global_us = status_global_us;
   int leader = status_leader;
-  char network[sizeof(status_network)];
+  char network[sizeof(status_network)], errors[sizeof(status_errors)];
   memcpy(network, status_network, sizeof(network));
+  memcpy(errors, status_errors, sizeof(errors));
   pthread_mutex_unlock(&q_lock);
 
-  redisReply *r = redisCommand(rc, "HSET vehicle:heartbeat wall_ms %lld global_us %lld leader %d network %s",
-                               wall.tv_sec * 1000LL + wall.tv_nsec / 1000000, global_us, leader, network);
+  redisReply *r = redisCommand(rc, "HSET vehicle:heartbeat wall_ms %lld global_us %lld leader %d network %s errors %s",
+                               wall.tv_sec * 1000LL + wall.tv_nsec / 1000000, global_us, leader, network, errors);
   bool ok = r && r->type != REDIS_REPLY_ERROR;
   freeReplyObject(r);
   if (!ok)
