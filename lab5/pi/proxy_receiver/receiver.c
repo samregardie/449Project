@@ -654,10 +654,14 @@ int main()
     toggle(CMD_TX_GPIO);
   }
 
-  // can_rx and input never touch GPIO, so only tick and pps have to stop first
-  // (pps can take up to ~1 s: it may be waiting for the next second)
+  // Stop tick and pps first, they drive the LEDs (pps can take up to ~1 s: it
+  // may be waiting for the next second). Then turn every output off: pigpio
+  // leaves pins as they were, so LEADER would stay lit after we exit.
+  // (can_rx and input only toggle the CAN_TX test points, when they send.)
   pthread_join(tick_tid, NULL);
   pthread_join(pps_tid, NULL);
+  for (size_t i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++)
+    gpioWrite(outputs[i], PI_LOW);
   gpioTerminate();
   return 0;
 }
