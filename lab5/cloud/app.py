@@ -22,8 +22,9 @@ PAGE = (Path(__file__).parent / "page.html").read_text()
 basic = HTTPBasic()
 r = redis.Redis(password=os.environ["REDIS_PASSWORD"], decode_responses=True)
 
-# The last heartbeat we saw. Kept so the page can still show the last known
-# state, greyed out, after the Pi goes quiet and the Redis key expires.
+# The last heartbeat we saw and when it changed (by this server's clock, so no
+# clock comparison with the Pi). Kept so the page can still show the last known
+# state after the Pi goes quiet and the Redis key expires.
 last_heartbeat = {}
 last_heartbeat_at = 0.0
 
@@ -54,6 +55,22 @@ def parse_network(text):
     return nodes, cockpit.group(1) if cockpit else "unknown"
 
 
+def relays(nodes):
+    """Same rule as network_relay() in raftlog.c: two live nodes that share no bus
+    need a third node that is up on both buses to forward between them."""
+    def share_bus(x, y):
+        return (x["bus_a"] and y["bus_a"]) or (x["bus_b"] and y["bus_b"])
+
+    result = []
+    for i, x in enumerate(nodes):
+        for y in nodes[i + 1:]:
+            if x["up"] and y["up"] and not share_bus(x, y):
+                via = [n["id"] for n in nodes
+                       if n not in (x, y) and n["up"] and n["bus_a"] and n["bus_b"]]
+                result.append({"between": [x["id"], y["id"]], "via": via})  # via [] = no path
+    return result
+
+
 @app.get("/", response_class=HTMLResponse)
 def page():
     return PAGE
@@ -63,7 +80,7 @@ def page():
 def state():
     global last_heartbeat, last_heartbeat_at
     hb = r.hgetall("vehicle:heartbeat")  # {} once the key has expired: the Pi went quiet
-    if hb:
+    if hb and hb.get("wall_ms") != last_heartbeat.get("wall_ms"):
         last_heartbeat, last_heartbeat_at = hb, time.time()
 
     entries = [fields for _id, fields in r.xrevrange("vehicle:log", count=HELD_WINDOW)]
@@ -74,12 +91,14 @@ def state():
 
     return {
         "stale": not hb,
-        "seconds_since_heartbeat": round(time.time() - last_heartbeat_at) if last_heartbeat_at else None,
+        "heartbeat_age_s": round(time.time() - last_heartbeat_at, 1) if last_heartbeat_at else None,
         "nodes": nodes,
+        "relays": relays(nodes),
         "cockpit": cockpit,
-        "leader": int(last_heartbeat.get("leader", 0)),  # also the time master; 0 = unknown
+        "leader": int(last_heartbeat.get("leader", 0)),  # 0 = unknown
         "term": int(entries[0]["term"]) if entries else None,
         "global_us": int(last_heartbeat["global_us"]) if last_heartbeat else None,
         "held_events": held,
+        "log_length": r.xlen("vehicle:log"),
         "log": entries[:LOG_ROWS],
     }

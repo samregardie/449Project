@@ -5,8 +5,14 @@
  * entry it already has. On every (re)connect we read the newest ID in the
  * stream and drop everything up to it from the queue: that is "resume from
  * the last acknowledged stream ID". An entry leaves the queue only once Redis
- * has it. After a full vehicle restart the log starts at index 1 again, so
- * clear the stream first (on the VM: redis-cli --askpass DEL vehicle:log).
+ * has it.
+ *
+ * New run: after all nodes restart, the log starts at index 1 again and the
+ * old stream would refuse it. A fresh run is the only time the Pi commits
+ * index 1 without it being replayed (after a Pi-only reboot, index 1 comes
+ * back replayed from the leader), so that entry clears the old stream first.
+ * Limit: with LEADER=random, a Pi started well after the STM32s gets index 1
+ * replayed too; clear by hand then (on the VM: redis-cli --askpass DEL vehicle:log).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +89,15 @@ static void drop_through(uint16_t index)
   pthread_mutex_unlock(&q_lock);
 }
 
+// The oldest queued entry starts a new run (see the top of this file)
+static bool front_is_new_run(void)
+{
+  pthread_mutex_lock(&q_lock);
+  bool yes = q_count > 0 && queue[q_head].index == 1 && !queue[q_head].replayed;
+  pthread_mutex_unlock(&q_lock);
+  return yes;
+}
+
 static void disconnect(const char *why)
 {
   if (!reported_down)
@@ -120,7 +135,8 @@ static bool connect_redis(void)
   }
   int last = r->elements ? atoi(r->element[0]->element[0]->str) : 0; // "12-0" -> 12
   freeReplyObject(r);
-  drop_through(last);
+  if (!front_is_new_run()) // a new run clears the stream instead (send_entries)
+    drop_through(last);
   printf("[N1] PUB connected to %s, stream already has up to index %d\n", host, last);
   reported_down = false;
   return true;
@@ -137,7 +153,17 @@ static bool send_entries(void)
     if (!any)
       return true;
 
-    redisReply *r = redisCommand(
+    redisReply *r;
+    if (e.index == 1 && !e.replayed) {
+      r = redisCommand(rc, "DEL vehicle:log");
+      bool ok = r && r->type != REDIS_REPLY_ERROR;
+      freeReplyObject(r);
+      if (!ok)
+        return false;
+      printf("[N1] PUB new run: cleared the old stream\n");
+    }
+
+    r = redisCommand(
         rc, "XADD vehicle:log %d-0 term %d index %d type %s node %d entry %d replayed %d global_us %lld",
         e.index, e.term, e.index, entry_name(e.entry), ENTRY_NODE(e.entry), e.entry, e.replayed,
         (long long)e.global_us);

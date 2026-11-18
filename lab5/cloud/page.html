@@ -7,83 +7,91 @@
 <style>
   :root {
     --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e4e7ec;
-    --ok: #15803d; --ok-bg: #dcfce7; --bad: #b91c1c; --bad-bg: #fee2e2;
+    --ok: #15803d; --ok-bg: #dcfce7; --bad: #b91c1c; --bad-bg: #fee2e2; --off-bg: #eef0f3;
     --warn: #92400e; --warn-bg: #fef3c7; --accent: #1d4ed8; --accent-bg: #dbeafe;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0f1115; --card: #181b22; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a;
-      --ok: #4ade80; --ok-bg: #12321f; --bad: #f87171; --bad-bg: #3a1515;
+      --ok: #4ade80; --ok-bg: #12321f; --bad: #f87171; --bad-bg: #3a1515; --off-bg: #23272f;
       --warn: #fcd34d; --warn-bg: #3a2e10; --accent: #93c5fd; --accent-bg: #172a46;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  h1 { font-size: 20px; margin: 0; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0 auto 0 0; }
   h2 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-       color: var(--muted); margin: 28px 0 10px; }
+       color: var(--muted); margin: 28px 0 10px; display: flex; justify-content: space-between; }
+  h2 span { font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
   .pill { padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
-  .pill.live { background: var(--ok-bg); color: var(--ok); }
-  .pill.stale { background: var(--warn-bg); color: var(--warn); }
-  .banner { background: var(--warn-bg); color: var(--warn); padding: 10px 14px;
-            border-radius: 8px; margin-top: 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .nodes { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  #content { transition: opacity .3s; }
-  #content.dimmed { opacity: .5; }
-  .node-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .node-name { font-weight: 600; }
-  .label { color: var(--muted); font-size: 13px; }
-  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
-  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
-  .chip.ok { background: var(--ok-bg); color: var(--ok); }
-  .chip.bad { background: var(--bad-bg); color: var(--bad); }
-  .chip.role { background: var(--accent-bg); color: var(--accent); }
-  .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .value.ok { color: var(--ok); } .value.bad { color: var(--bad); }
-  .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .live { background: var(--ok-bg); color: var(--ok); }
+  .stale { background: var(--warn-bg); color: var(--warn); }
+  .banner { background: var(--warn-bg); color: var(--warn); padding: 10px 14px; border-radius: 8px; margin-top: 16px; }
+  .dimmed { opacity: .45; transition: opacity .3s; }
+
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   td { font-variant-numeric: tabular-nums; }
   tr:last-child td { border-bottom: none; }
-  .empty { color: var(--muted); padding: 14px; }
+  .net td.cell, .net th.cell { text-align: center; padding-left: 6px; padding-right: 6px; }
+  .net td:first-child { white-space: normal; }
+
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); }
+  .tag.bad { background: var(--bad-bg); color: var(--bad); }
+  .tag.off { background: var(--off-bg); color: var(--muted); }
+  .tag.role { background: var(--accent-bg); color: var(--accent); margin-left: 8px; }
+  .relay { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+  .relay.bad { color: var(--bad); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .value { font-size: 22px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .value.ok { color: var(--ok); } .value.bad { color: var(--bad); }
+  .empty { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>Vehicle mirror</h1>
+    <span id="age" class="muted"></span>
     <span id="status" class="pill stale">Connecting…</span>
   </header>
   <div id="banner" class="banner" hidden></div>
 
-  <div id="content">
-    <h2>Nodes</h2>
-    <div id="nodes" class="grid nodes"></div>
+  <div id="current">
+    <h2>Network</h2>
+    <div class="box">
+      <table class="net">
+        <thead><tr><th>Node</th><th class="cell">Status</th><th class="cell">Bus A</th><th class="cell">Bus B</th></tr></thead>
+        <tbody id="nodes"></tbody>
+      </table>
+      <div id="relay" class="relay"></div>
+    </div>
 
     <h2>Cluster</h2>
-    <div class="grid">
-      <div class="card"><div class="label">Leader · time master</div><div id="leader" class="value">–</div></div>
-      <div class="card"><div class="label">Term</div><div id="term" class="value">–</div></div>
-      <div class="card"><div class="label">Cockpit</div><div id="cockpit" class="value">–</div></div>
-      <div class="card"><div class="label">Held events</div><div id="held" class="value">–</div></div>
-      <div class="card"><div class="label">Global time</div><div id="global" class="value">–</div></div>
+    <div class="stats">
+      <div class="stat"><div class="muted">Leader</div><div id="leader" class="value">–</div></div>
+      <div class="stat"><div class="muted">Term</div><div id="term" class="value">–</div></div>
+      <div class="stat"><div class="muted">Cockpit</div><div id="cockpit" class="value">–</div></div>
+      <div class="stat"><div class="muted">Held events</div><div id="held" class="value">–</div></div>
+      <div class="stat"><div class="muted">Global time</div><div id="global" class="value">–</div></div>
     </div>
+  </div>
 
-    <h2>Latest committed entries</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Index</th><th>Term</th><th>Entry</th><th>Node</th><th>Global time</th><th></th></tr></thead>
-        <tbody id="log"></tbody>
-      </table>
-    </div>
+  <h2>Log <span id="logsize" class="muted"></span></h2>
+  <div class="box">
+    <table>
+      <thead><tr><th>Index</th><th>Term</th><th>Entry</th><th>Node</th><th>Global time</th><th></th></tr></thead>
+      <tbody id="log"></tbody>
+    </table>
   </div>
 </main>
 
@@ -98,30 +106,39 @@
     return e;
   }
 
-  const seconds = us => us == null ? '–' : (Number(us) / 1e6).toFixed(3) + ' s';
-
-  function nodeCard(n, leader) {
-    const card = el('div', 'card');
-    const head = el('div', 'node-head');
-    const alive = el('span', 'label');
-    alive.append(el('span', 'dot ' + (n.up ? 'ok' : 'bad')), n.up ? 'Alive' : 'Down');
-    head.append(el('span', 'node-name', `N${n.id} · ${n.name}`), alive);
-
-    const chips = el('div', 'chips');
-    chips.append(el('span', 'chip ' + (n.bus_a ? 'ok' : 'bad'), 'Bus A ' + (n.bus_a ? 'up' : 'down')));
-    chips.append(el('span', 'chip ' + (n.bus_b ? 'ok' : 'bad'), 'Bus B ' + (n.bus_b ? 'up' : 'down')));
-    if (n.id === leader) chips.append(el('span', 'chip role', 'Leader · time master'));
-    card.append(head, chips);
-    return card;
+  // Global time in us -> "1:50:39", or with milliseconds for log entries
+  function clock(us, withMs) {
+    if (us == null) return '–';
+    const ms = Math.floor(Number(us) / 1000), s = Math.floor(ms / 1000);
+    const hms = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    return withMs ? `${hms}.${String(ms % 1000).padStart(3, '0')}` : hms;
   }
 
-  function logRow(e) {
+  function cell(text, cls) {
+    const td = el('td', 'cell');
+    td.append(el('span', 'tag ' + cls, text));
+    return td;
+  }
+
+  function nodeRow(n, leader) {
+    const name = el('td');
+    name.append(`N${n.id} · ${n.name}`);
+    if (n.id === leader) name.append(el('span', 'tag role', 'Leader'));
+    const bus = on => !n.up ? cell('–', 'off') : on ? cell('on', 'ok') : cell('off', 'bad');
     const tr = el('tr');
-    const tag = el('td');
-    if (e.replayed === '1') tag.append(el('span', 'chip role', 'replayed'));
-    tr.append(el('td', '', e.index), el('td', '', e.term), el('td', '', e.type),
-              el('td', '', 'N' + e.node), el('td', '', seconds(e.global_us)), tag);
+    tr.append(name, n.up ? cell('up', 'ok') : cell('down', 'bad'), bus(n.bus_a), bus(n.bus_b));
     return tr;
+  }
+
+  // One line: which pairs share no bus, and who forwards between them
+  function relayText(relays) {
+    if (!relays.length) return ['Relay: not needed, every pair of nodes shares a bus', ''];
+    const lines = relays.map(r => {
+      const pair = `N${r.between[0]} and N${r.between[1]}`;
+      return r.via.length ? `Relay: ${r.via.map(v => 'N' + v).join(', ')} forwards between ${pair}`
+                          : `No path: ${pair} share no bus and no node can relay`;
+    });
+    return [lines.join(' · '), relays.some(r => !r.via.length) ? 'bad' : ''];
   }
 
   function showStatus(text, live, banner) {
@@ -129,32 +146,49 @@
     $('status').className = 'pill ' + (live ? 'live' : 'stale');
     $('banner').hidden = !banner;
     $('banner').textContent = banner || '';
-    $('content').classList.toggle('dimmed', !live);
+    $('current').classList.toggle('dimmed', !live);
   }
 
   function render(s) {
+    $('age').textContent = s.heartbeat_age_s == null ? '' : `heartbeat ${s.heartbeat_age_s.toFixed(1)} s ago`;
     if (!s.stale) showStatus('Live', true);
-    else if (s.seconds_since_heartbeat == null) showStatus('Stale', false, 'No heartbeat from the Pi yet.');
-    else showStatus('Stale', false, `No heartbeat from the Pi for ${s.seconds_since_heartbeat} s. ` +
-                                    'Showing the last known state; it catches up when the Pi is back.');
+    else if (s.heartbeat_age_s == null) showStatus('Stale', false, 'No heartbeat from the Pi yet.');
+    else showStatus('Stale', false, 'The Pi stopped publishing. Network and cluster show the last known state.');
 
-    $('nodes').replaceChildren(...(s.nodes.length ? s.nodes.map(n => nodeCard(n, s.leader))
-                                                   : [el('div', 'empty', 'No network state yet.')]));
-    $('leader').textContent = s.leader ? 'N' + s.leader : 'Unknown';
+    const rows = s.nodes.map(n => nodeRow(n, s.leader));
+    if (!rows.length) {
+      const td = el('td', 'empty', 'No network state yet.');
+      td.colSpan = 4;
+      rows.push(el('tr'));
+      rows[0].append(td);
+    }
+    $('nodes').replaceChildren(...rows);
+    const [relay, relayCls] = relayText(s.relays);
+    $('relay').textContent = relay;
+    $('relay').className = 'relay ' + relayCls;
+
+    $('leader').textContent = s.leader ? 'N' + s.leader : '?';
     $('term').textContent = s.term ?? '–';
     $('cockpit').textContent = s.cockpit === 'ok' ? 'OK' : s.cockpit === 'error' ? 'Error' : '–';
     $('cockpit').className = 'value ' + (s.cockpit === 'ok' ? 'ok' : s.cockpit === 'error' ? 'bad' : '');
     $('held').textContent = s.held_events;
-    $('global').textContent = seconds(s.global_us);
+    $('global').textContent = clock(s.global_us);
 
-    const rows = s.log.map(logRow);
-    if (!rows.length) {
+    $('logsize').textContent = `${s.log_length} entries mirrored`;
+    const log = s.log.map(e => {
+      const tr = el('tr'), tag = el('td');
+      if (e.replayed === '1') tag.append(el('span', 'tag role', 'replayed'));
+      tr.append(el('td', '', e.index), el('td', '', e.term), el('td', '', e.type),
+                el('td', '', 'N' + e.node), el('td', '', clock(e.global_us, true)), tag);
+      return tr;
+    });
+    if (!log.length) {
       const td = el('td', 'empty', 'No entries yet.');
       td.colSpan = 6;
-      rows.push(el('tr'));
-      rows[0].append(td);
+      log.push(el('tr'));
+      log[0].append(td);
     }
-    $('log').replaceChildren(...rows);
+    $('log').replaceChildren(...log);
   }
 
   // Ask for fresh data every second; the page itself never reloads

@@ -29,5 +29,7 @@ sudo chmod 600 /etc/vehicle-pub.env
 Then `sudo ./run.sh` as usual; it reads that file. Look for `[N1] PUB connected to 449-car`.
 No file means the publisher is off and the cockpit runs as before.
 
-Before a fresh run (all nodes rebooted, log back at index 1), clear the old stream on the VM:
+A fresh run (all nodes rebooted, log back at index 1) clears the old stream by itself:
+the Pi prints `[N1] PUB new run: cleared the old stream`. One exception: with
+`LEADER=random`, if the Pi starts well after the STM32s, clear it by hand on the VM with
 `redis-cli --askpass DEL vehicle:log`.
