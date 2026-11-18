@@ -30,6 +30,7 @@
 #include "raft_config.h" // Raft config (shared with the STM32s)
 #include "raftlog.h"     // replicated log and state machine (shared with the STM32s)
 #include "raftnode.h"    // Raft agent (shared with the STM32s)
+#include "publisher.h"   // cloud mirror (extra credit)
 
 /** Configure this **/
 //#define LOCAL_HOST "172.26.166.54" // IP of local interface
@@ -73,6 +74,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static int64_t last_udp_ms;
 static int64_t last_hb_ms[2][2]; // [zone][bus]
 static uint8_t zone_fault[2];
+static uint8_t zone_reason[2]; // last FAULT reason (FAULT_*) while its HB fault bit is set, for the cloud mirror
 static uint8_t zone_buses[2]; // HB byte 2: bit0 = it hears someone on A, bit1 = on B
 static bool test_fault;
 static int blink_req; // from the paddles
@@ -215,6 +217,32 @@ static void seen_locked(int64_t now, struct node_seen seen[RAFT_N + 1])
                                            .buses = bus_ok[0] | bus_ok[1] << 1 };
 }
 
+// Why we are in the error state, e.g. "N3 self-test, N1 no wheel UDP" ("" = no
+// error). Only for the cloud mirror. Under `lock`.
+static void error_reasons_locked(int64_t now, const struct node_seen seen[RAFT_N + 1],
+                                 char *buf, size_t size)
+{
+  static const char *const why[] = { [FAULT_HB_LOST] = "lost a node", [FAULT_TEST_BUTTON] = "self-test",
+                                     [FAULT_BAD_CTRL] = "bad command" };
+  size_t len = 0;
+  buf[0] = '\0';
+  if (test_fault)
+    len += snprintf(buf + len, size - len, "N1 self-test, ");
+  if (len < size && now - last_udp_ms > UDP_TIMEOUT_MS)
+    len += snprintf(buf + len, size - len, "N1 no wheel UDP, ");
+  if (len < size && raftnode_log_full())
+    len += snprintf(buf + len, size - len, "N1 log full, ");
+  for (int n = 2; n <= 3 && len < size; n++) {
+    uint8_t r = zone_reason[n - 2];
+    if (!seen[n].up)
+      len += snprintf(buf + len, size - len, "N%d lost, ", n);
+    else if (seen[n].fault)
+      len += snprintf(buf + len, size - len, "N%d %s, ", n, r && r <= FAULT_BAD_CTRL ? why[r] : "fault");
+  }
+  if (len >= 2 && len < size)
+    buf[len - 2] = '\0'; // drop the last ", "
+}
+
 // REF from our leader: global time is its time plus the frame delay, at rx_us.
 // Under `lock`.
 static void follow_ref_locked(const uint8_t d[8], int64_t rx_us)
@@ -291,6 +319,7 @@ static void print_commits(void)
       break;
     printf("[N1] COMMIT idx=%d term=%d %s node=%d (0x%02x)%s\n", i, t, entry_name(e),
            ENTRY_NODE(e), e, replayed ? " (replayed)" : "");
+    publisher_commit(i, t, e, replayed, global_gettime());
     any = true;
   }
 
@@ -331,7 +360,7 @@ static int route_locked(int64_t now)
 static void *tick(void *arg)
 {
   uint8_t seq_hb = 0, seq_blink = 0, seq_fault = 0, seq_ref = 0;
-  int sent_blink = -1, ticks = 0, append_ticks = 0;
+  int sent_blink = -1, ticks = 0, append_ticks = 0, status_ticks = 0;
   bool was_error = false, was_test = false;
   int printed_route = 0; // ROUTE line on change
   bool was_failed[2] = { true, true }; // no FAULT for zones that never started
@@ -425,6 +454,19 @@ static void *tick(void *arg)
       send_both(CAN_ID_BLINK, b);
     }
 
+    // Cloud mirror heartbeat contents, once a second (the publisher thread sends it)
+    if (++status_ticks == 1000 / TICK_MS) {
+      status_ticks = 0;
+      char net[96], errors[96];
+      pthread_mutex_lock(&lock);
+      struct network n = get_network();
+      int leader = raftnode_leader();
+      error_reasons_locked(now, seen, errors, sizeof(errors));
+      pthread_mutex_unlock(&lock);
+      network_format(&n, net, sizeof(net));
+      publisher_status(global_gettime(), leader, net, errors);
+    }
+
     // Last, after every frame of this tick is out
     print_commits();
   }
@@ -471,6 +513,12 @@ static void *can_rx(void *arg)
       last_hb_ms[z][bus] = now_ms();
       zone_fault[z] = f.data[1];
       zone_buses[z] = f.data[2];
+      if (!f.data[1])
+        zone_reason[z] = 0; // fault over
+      pthread_mutex_unlock(&lock);
+    } else if (f.can_id == CAN_ID_FAULT && fresh && (f.data[1] == 2 || f.data[1] == 3)) {
+      pthread_mutex_lock(&lock);
+      zone_reason[f.data[1] - 2] = f.data[2];
       pthread_mutex_unlock(&lock);
     } else if (f.can_id == CAN_ID_FORCE && fresh) {
       sendto(udp_fd, &f.data[1], 1, 0, (struct sockaddr *)&proxy, sizeof(proxy));
@@ -577,6 +625,10 @@ int main()
   // recv() gives up after 100 ms, so the loop sees `quit` even with no UDP
   struct timeval timeout = { .tv_usec = 100000 };
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+  // Before SCHED_FIFO: the publisher thread does network I/O and must keep
+  // normal priority, below everything that sends CAN frames.
+  publisher_start();
 
   pthread_t tick_tid, pps_tid, tid;
   // SCHED_FIFO so Linux load can't delay HB_TX/HB_MON long enough to look like

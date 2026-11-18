@@ -871,6 +871,11 @@ bool raftnode_is_leader(void)
 	return role == LEADER;
 }
 
+int raftnode_leader(void)
+{
+	return leader;
+}
+
 bool raftnode_log_full(void)
 {
 	return log_full;

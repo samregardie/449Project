@@ -19,7 +19,7 @@ echo "requirepass $REDIS_PASSWORD" >> /etc/redis/redis.conf
 systemctl restart redis-server
 
 mkdir -p /opt/vehicle-gui
-cp app.py requirements.txt /opt/vehicle-gui/
+cp app.py page.html requirements.txt /opt/vehicle-gui/
 [ -d /opt/vehicle-gui/venv ] || python3 -m venv /opt/vehicle-gui/venv
 /opt/vehicle-gui/venv/bin/pip install -q -r /opt/vehicle-gui/requirements.txt
 cp vehicle-gui.service /etc/systemd/system/

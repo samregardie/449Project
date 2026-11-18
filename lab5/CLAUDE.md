@@ -25,11 +25,14 @@ Elections (team decisions, implemented in `raftnode.c`; host-simulated with thre
 - **Replayed:** an entry is replayed if the leader had already committed it when we got it. In `on_append`, when the leader's commit index is past the end of our log, `replayed_until` rises to it; entries up to there print `COMMIT ... (replayed)`. One number, no per-entry storage. (Refines the "first APPEND" answer: the commit index in an APPEND is capped 255 back, so one APPEND can under-count.)
 - **Relay:** when relaying, the Pi forwards every frame not its own (`from_cockpit()`), like the STM32s.
 - **Known limit (document in the report):** `last_req` is in the leader's RAM only. If a leader appends an EVENT and dies before its OK, the new leader can append the client's retry a second time. The 1-byte entry has no room for the request number.
+- **Cloud mirror (extra credit):** `publisher.c` on the Pi. `print_commits()` and a once-a-second status in `tick()` only copy into its queue (its own mutex, never `lock`); one thread, started before SCHED_FIFO so it keeps normal priority, does all Redis I/O. Stream ID = log index, so Redis refuses duplicates and a reconnect resumes after the stream's newest ID. Index 1 committed without being replayed means a fresh run (a rebooted Pi gets index 1 replayed), so it clears the old stream first. Heartbeat hash `vehicle:heartbeat` (wall time, global time, leader = time master, network) expires after 3 s, which drives the GUI's stale banner. FL/RL offset not measured yet.
 - **Debug (RAFT_DEBUG):** `[N2] RAFT timeout -> pre-vote term=2`, `RAFT candidate term=2`, `RAFT vote N3 term=2 yes`, `RAFT leader term=2 votes=2`, `RAFT follow N3 term=2`, `RAFT leader term=1 (default leader)`.
 
 ```
 lab5/
   pi/proxy_receiver/   N1 cockpit (C, pigpio, SocketCAN on canA/canB). build.sh includes ../../stm32-common/include for the shared headers.
+                       publisher.c: cloud mirror (extra credit), Redis on the VM 449-car via hiredis. See cloud/README.md.
+  cloud/               Extra credit VM: status page (app.py) and setup.sh. Not built with the rest.
   stm32-common/        Not an app. .c/.h shared by both STM32 nodes; each node's CMakeLists.txt adds them.
                        include/catalog.h and include/raft_config.h are plain C, shared by all three nodes (the Pi too).
   stm32-front/         N2 steering app (NODE_ID=2): servo
